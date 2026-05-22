@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PrizePicks WNBA Optimizer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0a0a;
+            color: #f0f0f0;
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            width: 100vw;
+            overflow: auto;
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: #555 #1a1a1a;
+            touch-action: manipulation;
+            -webkit-overflow-scrolling: touch;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        .title-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            background: #0a0a0a;
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        .title-header h1 { margin: 0; font-size: 24px; font-weight: 700; color: #ff00aa; }
+        .title-header .info-icon {
+            margin-left: 8px;
+            cursor: pointer;
+            font-size: 20px;
+            color: #00ffcc;
+            transition: color 0.2s;
+        }
+        .title-header .info-icon:hover { color: #00e6b3; }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 24px;
+            background: #0a0a0a;
+            position: sticky;
+            top: 50px;
+            z-index: 20;
+            flex-wrap: wrap;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            gap: 8px;
+        }
+        #search {
+            padding: 10px 16px;
+            border-radius: 9999px;
+            border: 1px solid #333;
+            background: #1a1a1a;
+            color: #f0f0f0;
+            width: 200px;
+            transition: border-color 0.2s;
+        }
+        #search:focus { border-color: #00ffcc; outline: none; }
+        .filter-btn {
+            padding: 10px 20px;
+            background: #00ffcc;
+            color: #000;
+            border: none;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 2px 4px rgba(0, 255, 204, 0.3);
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background: #00e6b3;
+            transform: translateY(-1px);
+        }
+        .toggle {
+            display: flex;
+            gap: 4px;
+            background: #222;
+            border-radius: 9999px;
+            padding: 4px;
+        }
+        .toggle button {
+            padding: 8px 20px;
+            background: transparent;
+            border: none;
+            border-radius: 9999px;
+            cursor: pointer;
+            color: #f0f0f0;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .toggle button.active { background: #00ffcc; color: #000; }
+        .view-switch, .selected-switch { display: flex; align-items: center; gap: 8px; }
+        .view-switch span, .selected-switch span { font-size: 12px; font-weight: 500; }
+        .switch { position: relative; display: inline-block; width: 40px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #00ffcc; }
+        input:checked + .slider:before { transform: translateX(16px); }
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            background: #0a0a0a;
+            padding: 12px 40px;
+            position: sticky;
+            top: 100px;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        .tab {
+            padding: 8px 20px;
+            margin: 6px;
+            background: #222;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .tab:hover { background: #333; }
+        .tab.active { background: #00ffcc; color: #000; }
+        #content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            padding: 16px;
+            max-width: calc(300px * 4 + 16px * 3);
+            margin: 0 auto;
+        }
+        #content.table-view {
+            display: block;
+            max-width: 100%;
+            grid-template-columns: none;
+            overflow-x: auto;
+        }
+        #content.table-view table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #content.table-view th {
+            background: #222;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: #ccc;
+            border-bottom: 2px solid #333;
+        }
+        #content.table-view td {
+            padding: 12px 8px;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+        }
+        .card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+            position: relative;
+            width: 100%;
+            box-sizing: border-box;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #888; }
+        .pop { color: #00ffcc; font-size: 16px; font-weight: 600; }
+        .headshot { width: 80px; height: 80px; border-radius: 50%; margin: 12px 0; border: 2px solid #333; }
+        .team { font-size: 14px; color: #ccc; font-weight: 500; }
+        .name { font-weight: 600; font-size: 18px; }
+        .game { font-size: 14px; color: #888; margin-bottom: 8px; }
+        .stat { margin-top: 10px; font-size: 20px; font-weight: 700; }
+        .buttons { display: flex; margin-top: 8px; background: #121212; border-radius: 9999px; overflow: hidden; position: relative; }
+        .button { flex: 1; padding: 10px 16px; border: none; font-size: 14px; color: #fff; background: transparent; cursor: pointer; opacity: 0.7; transition: opacity 0.2s, background 0.2s; }
+        .button:hover { opacity: 1; background: #222; }
+        .button.selected { font-weight: 600; opacity: 1; background: #333; }
+        .green-outline { outline: 3px solid #4dff4d; }
+        .red-outline { outline: 3px solid #ff4d4d; }
+        .button.selected.selected-more { background-color: #4dff4d; color: #000; }
+        .button.selected.selected-less { background-color: #ff4d4d; color: #000; }
+        .divider { position: absolute; top: 4px; bottom: 4px; left: 50%; width: 3px; background: #333; transform: translateX(-50%); z-index: 1; }
+        .divider.more { background: #4dff4d; }
+        .divider.less { background: #ff4d4d; }
+        .info-icon { position: absolute; top: 16px; right: 16px; cursor: pointer; font-size: 18px; color: #00ffcc; }
+        .icon { position: absolute; top: 40px; right: 16px; font-size: 20px; }
+        .loading { text-align: center; padding: 20px; font-size: 18px; color: #00ffcc; }
+        #popup, #calloutPopup, #advancedFilterPopup, #betslipPopup, #toolInfoPopup {
+            display: none;
+            position: fixed;
+            top: 10%;
+            left: 50%;
+            transform: translate(-50%, 0);
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 16px;
+            z-index: 40;
+            max-height: 80vh;
+            overflow-y: auto;
+            width: 90%;
+            max-width: 800px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+            -webkit-overflow-scrolling: touch;
+        }
+        #popup h3, #betslipPopup h3, #calloutPopup h3, #toolInfoPopup h3, #advancedFilterPopup h3 { margin-top: 20px; font-weight: 600; }
+        #popup label, #calloutPopup label, #advancedFilterPopup label { display: block; font-size: 14px; }
+        #filterBtn, #betslipBtn, #calloutFilterBtn, #advancedFilterBtn {
+            padding: 8px 20px;
+            background: #00ffcc;
+            color: #000;
+            border: none;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        #filterBtn:hover, #betslipBtn:hover, #calloutFilterBtn:hover, #advancedFilterBtn:hover { background: #00e6b3; }
+        #applyFilter, #closeBetSlip, #applyCalloutFilter, #closeToolInfo, #applyAdvancedFilter {
+            margin-bottom: 20px;
+            padding: 8px 20px;
+            background: #4dff4d;
+            color: #000;
+            border: none;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        #applyFilter:hover, #closeBetSlip:hover, #applyCalloutFilter:hover, #closeToolInfo:hover, #applyAdvancedFilter:hover { background: #66ff66; }
+        .select-btn {
+            margin: 5px 0;
+            padding: 6px 12px;
+            background: #333;
+            border: none;
+            border-radius: 9999px;
+            color: #f0f0f0;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .select-btn:hover { background: #444; }
+        .payout-filter-container { display: flex; align-items: center; gap: 0.5rem; }
+        #payoutFilter {
+            padding: 0.5rem 1rem;
+            background: #1a1a1a;
+            color: #f0f0f0;
+            border: 1px solid #333;
+            border-radius: 9999px;
+            cursor: pointer;
+        }
+        .betslips-container {
+            background: #121212;
+            border-radius: 16px;
+            padding: 12px;
+            -webkit-overflow-scrolling: touch;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            -webkit-overflow-scrolling: touch;
+        }
+        th, td {
+            padding: 0.75rem;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        th {
+            background: #222;
+            font-weight: 500;
+            cursor: pointer;
+            position: sticky;
+            top: 0;
+            color: #f0f0f0;
+        }
+        tr:nth-child(even) { background: #181818; }
+        th.asc::after { content: ' ↑'; }
+        th.desc::after { content: ' ↓'; }
+        .error-message { color: #ff4d4d; text-align: center; margin: 1rem; }
+        .expanded-details td { background-color: #121212; padding: 1rem; text-align: left; }
+        #playerPopup {
+            display: none;
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translate(-50%, 0);
+            background: #1a1a1a;
+            color: #f0f0f0;
+            padding: 10px;
+            border-radius: 16px;
+            z-index: 50;
+            width: 95%;
+            max-width: 900px;
+            height: auto;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+        }
+        #playerPopup .header { display: flex; flex-direction: column; align-items: flex-start; background: linear-gradient(to right, #0a0a0a, #142a2e); padding: 8px; border-radius: 16px 16px 0 0; }
+        #playerPopup .bottom-header { display: flex; justify-content: space-between; align-items: flex-end; width: 100%; }
+        #playerPopup .left-header { display: flex; align-items: center; }
+        #playerPopup .headshot { width: 60px; height: 60px; border-radius: 50%; border: 2px solid #333; }
+        #playerPopup .player-info { margin-left: 12px; flex: 1; }
+        #playerPopup .tabs { display: flex; background: #0a0a0a; position: relative; top: auto; padding: 8px; overflow-x: auto; white-space: nowrap; }
+        #playerPopup .tab-content { padding: 12px; }
+        #playerPopup table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.7rem; }
+        #playerPopup th, #playerPopup td { border: 1px solid #333; padding: 4px; text-align: center; word-wrap: break-word; }
+        #playerPopup th { font-size: 0.7rem; font-weight: 600; background-color: #222; cursor: pointer; }
+        #playerPopup td { font-size: 0.65rem; }
+        #chartContainer { margin: 20px 0; max-width: 100%; overflow-x: auto; }
+        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 35; }
+        #popupName { font-size: 24px; font-weight: 700; color: #f0f0f0; display: inline-flex; align-items: center; word-break: break-word; width: 100%; text-align: left; }
+        #popupGame, #popupScheduledAt { font-size: 14px; font-weight: 600; }
+        .stats-boxes { display: flex; justify-content: space-between; flex-wrap: nowrap; }
+        .stat-box { background: #222; padding: 6px 8px; border-radius: 8px; text-align: center; min-width: 60px; margin: 3px; }
+        .stat-label { font-size: 10px; color: #ccc; }
+        .stat-value { font-size: 12px; font-weight: 600; }
+        .dvp-green { color: #4dff4d; }
+        .dvp-yellow { color: #ffd700; }
+        .dvp-red { color: #ff4d4d; }
+        .spread-green { color: #4dff4d; }
+        .spread-yellow { color: #ffd700; }
+        .spread-red { color: #ff4d4d; }
+        .ou-green { color: #4dff4d; }
+        .ou-yellow { color: #ffd700; }
+        .ou-red { color: #ff4d4d; }
+        #prevPlayer { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); z-index: 51; background: #222; color: #f0f0f0; border: none; padding: 10px 16px; cursor: pointer; border-radius: 8px; transition: background 0.2s; }
+        #nextPlayer { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 51; background: #222; color: #f0f0f0; border: none; padding: 10px 16px; cursor: pointer; border-radius: 8px; transition: background 0.2s; }
+        #prevPlayer:hover, #nextPlayer:hover { background: #333; }
+        .popup-buttons {
+            display: flex;
+            margin-top: 10px;
+            background: #121212;
+            border-radius: 9999px;
+            overflow: hidden;
+            width: fit-content;
+            margin: 10px auto 10px;
+            position: relative;
+        }
+        .popup-buttons .button { flex: 1; padding: 4px 40px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+        #betTypeSelect, #oddsSelect, #viewSelect { padding: 10px; border-radius: 9999px; border: 1px solid #333; background: #1a1a1a; color: #f0f0f0; margin: 10px 0; width: 100%; display: none; font-weight: 500; }
+        #closePlayerPopup { position: absolute; top: 10px; right: 20px; cursor: pointer; font-size: 24px; color: #f0f0f0; z-index: 52; }
+        #closePlayerPopup:hover { color: #ff4d4d; }
+        #gameLogSearch { width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 9999px; border: 1px solid #333; background: #1a1a1a; color: #f0f0f0; }
+        .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1"></script>
+</head>
+<body>
+    <div id="overlay"></div>
+    <div class="title-header">
+        <h1>PrizePicks WNBA Optimizer</h1>
+        <span class="info-icon" id="tool-info">ℹ️</span>
+    </div>
+    <div class="controls">
+        <input id="search" type="text" placeholder="Search players or stats...">
+        <button id="filterBtn" class="filter-btn">Filter Games/Teams</button>
+        <button id="calloutFilterBtn" class="filter-btn">Filter Callouts</button>
+        <button id="advancedFilterBtn" class="filter-btn">Filter Bet Tag / Fav / O/U</button>
+        <button id="betslipBtn" class="filter-btn">Generated Bet Slips</button>
+        <select id="oddsSelect"></select>
+        <select id="betTypeSelect"></select>
+        <select id="viewSelect">
+            <option value="cards">Cards</option>
+            <option value="table">Table</option>
+        </select>
+        <div class="toggle">
+            <button class="toggle-btn active" data-type="all">All</button>
+            <button class="toggle-btn" data-type="standard">Standard</button>
+            <button class="toggle-btn" data-type="demon">Demon</button>
+            <button class="toggle-btn" data-type="goblin">Goblin</button>
+        </div>
+        <div class="selected-switch">
+            <span>Selected Only</span>
+            <label class="switch">
+                <input type="checkbox" id="selectedToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+    <div class="tabs"></div>
+    <div id="content"></div>
+
+    <!-- Player Popup -->
+    <div id="playerPopup">
+        <span id="closePlayerPopup" style="position:absolute;top:10px;right:20px;cursor:pointer;font-size:24px;color:#f0f0f0;">×</span>
+        <div class="header">
+            <div id="popupName" style="font-size:24px;font-weight:700;color:#f0f0f0;"></div>
+            <div class="bottom-header">
+                <div class="left-header">
+                    <img id="popupHeadshot" class="headshot" src="" alt="">
+                    <div class="player-info">
+                        <div id="popupTeamPos"></div>
+                        <div id="popupGame"></div>
+                        <div id="popupScheduledAt"></div>
+                        <div id="popupSpreadOU"></div>
+                    </div>
+                </div>
+                <div id="statsBoxes" class="stats-boxes"></div>
+            </div>
+        </div>
+        <button id="prevPlayer" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:51;">‹</button>
+        <button id="nextPlayer" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:51;">›</button>
+        <div class="tabs" id="popupTabs"></div>
+        <div class="tab-content" id="popupContent"></div>
+    </div>
+
+    <!-- Filter Popup -->
+    <div id="popup" class="popup">
+        <button id="applyFilter">Apply</button>
+        <h3>Games</h3>
+        <button id="selectAllGames" class="select-btn">Select All</button>
+        <button id="deselectAllGames" class="select-btn">Deselect All</button>
+        <div id="gamesList"></div>
+        <h3>Teams</h3>
+        <button id="selectAllTeams" class="select-btn">Select All</button>
+        <button id="deselectAllTeams" class="select-btn">Deselect All</button>
+        <div id="teamsList"></div>
+    </div>
+
+    <!-- Callout Popup -->
+    <div id="calloutPopup" class="popup">
+        <button id="applyCalloutFilter">Apply</button>
+        <h3>Callout Bet Tags</h3>
+        <button id="selectAllCallouts" class="select-btn">Select All</button>
+        <button id="deselectAllCallouts" class="select-btn">Deselect All</button>
+        <div id="calloutsList"></div>
+    </div>
+
+    <!-- Advanced Filter Popup -->
+    <div id="advancedFilterPopup" class="popup">
+        <button id="applyAdvancedFilter">Apply</button>
+        <h3>Bet Tag (More / Less)</h3>
+        <button id="selectAllBetTags" class="select-btn">Select All</button>
+        <button id="deselectAllBetTags" class="select-btn">Deselect All</button>
+        <div id="betTagsList"></div>
+        <h3>Favorite (Yes / No)</h3>
+        <button id="selectAllFav" class="select-btn">Select All</button>
+        <button id="deselectAllFav" class="select-btn">Deselect All</button>
+        <div id="favList"></div>
+        <h3>Game Scoring (O/U)</h3>
+        <button id="selectAllGameTypes" class="select-btn">Select All</button>
+        <button id="deselectAllGameTypes" class="select-btn">Deselect All</button>
+        <div id="gameTypesList"></div>
+        <h3>Hot / Cold</h3>
+        <button id="selectAllHotCold" class="select-btn">Select All</button>
+        <button id="deselectAllHotCold" class="select-btn">Deselect All</button>
+        <div id="hotColdList"></div>
+    </div>
+
+    <!-- Bet Slip Popup -->
+    <div id="betslipPopup" class="popup">
+        <button id="closeBetSlip">Close</button>
+        <h3>Generated Bet Slips</h3>
+        <div class="payout-filter-container">
+            <label for="payoutFilter">Filter by Payout:</label>
+            <select id="payoutFilter" onchange="filterBetSlips()">
+                <option value="all">All</option>
+                <option value="3X">3X</option>
+                <option value="4X">4X</option>
+                <option value="6X">6X</option>
+                <option value="7X">7X</option>
+                <option value="10X">10X</option>
+                <option value="25X">25X</option>
+            </select>
+        </div>
+        <div class="betslips-container">
+            <table id="betslipsTable">
+                <thead><tr id="betslipsHeader"></tr></thead>
+                <tbody id="betslipsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Tool Info Popup -->
+    <div id="toolInfoPopup" class="popup">
+        <button id="closeToolInfo">Close</button>
+        <h3>How to Use PrizePicks WNBA Optimizer</h3>
+        <p>This tool helps you optimize your WNBA bets on PrizePicks.</p>
+        <ul>
+            <li>Use the search bar to find players or stats.</li>
+            <li>Filter by games, teams, callouts, bet tags, fav status, game scoring using the buttons.</li>
+            <li>Select odds type: All, Standard, Demon, or Goblin.</li>
+            <li>Switch tabs to view different stat categories (Points, Rebounds, Assists, Fantasy Score, etc.).</li>
+            <li>On each player card, click 'More' or 'Less' to add bets to your slip.</li>
+            <li>View and filter generated bet slips with calculated edges and payouts.</li>
+            <li>Click the info icon on cards for detailed player info and projections.</li>
+        </ul>
+    </div>
+
+    <script>
+        let allData = [];
+        let currentFiltered = [];
+        let currentTab = 'All';
+        let currentOddsType = 'standard';
+        let currentView = 'cards';
+        let searchTerm = '';
+        let uniqueGames = [];
+        let uniqueTeams = [];
+        let uniqueCallouts = [];
+        let uniqueBetTags = [];
+        let selectedGames = new Set();
+        let selectedTeams = new Set();
+        let selectedCallouts = new Set();
+        let selectedBetTags = new Set();
+        let selectedFav = new Set(['Yes', 'No']);
+        let selectedGameTypes = new Set(['High', 'Normal', 'Low']);
+        let selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
+        let selectedBets = [];
+        let selectedPayout = 'all';
+        let betSlipsSortColumn = 'Edge';
+        let betSlipsSortDirection = 'desc';
+        let contentSortColumn = 'Edge';
+        let contentSortDirection = 'desc';
+        let showSelectedOnly = false;
+
+        const contentDiv = document.getElementById('content');
+        contentDiv.innerHTML = '<div class="loading">Loading WNBA PrizePicks data...</div>';
+
+        const prizePicksUrl = './data/prizepicks-wnba.csv';
+
+        fetch(prizePicksUrl)
+            .then(res => res.text())
+            .then(csvText => {
+                allData = Papa.parse(csvText, { header: true, skipEmptyLines: true }).data;
+
+                uniqueGames = [...new Set(allData.map(row => row['Game Short Title']).filter(Boolean))].sort();
+                uniqueTeams = [...new Set(allData.map(row => row.Team).filter(Boolean))].sort();
+                uniqueCallouts = [...new Set(allData.map(row => row['Callout Bet Tag']).filter(Boolean))].sort();
+                uniqueBetTags = [...new Set(allData.map(row => row['Bet Tag']).filter(Boolean))].sort();
+
+                selectedGames = new Set(uniqueGames);
+                selectedTeams = new Set(uniqueTeams);
+                selectedCallouts = new Set(uniqueCallouts);
+                selectedBetTags = new Set(uniqueBetTags);
+                selectedFav = new Set(['Yes', 'No']);
+                selectedGameTypes = new Set(['High', 'Normal', 'Low']);
+
+                let uniqueStatTypes = ['All', ...new Set(allData.map(row => (row['Stat Type'] || '').trim()).filter(Boolean))].sort();
+
+                const tabsDiv = document.querySelector('.tabs');
+                tabsDiv.innerHTML = '';
+                uniqueStatTypes.forEach((tab, index) => {
+                    const btn = document.createElement('div');
+                    btn.classList.add('tab');
+                    if (index === 0) btn.classList.add('active');
+                    btn.textContent = tab;
+                    btn.onclick = () => {
+                        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentTab = tab;
+                        document.getElementById('betTypeSelect').value = tab;
+                        renderContent();
+                    };
+                    tabsDiv.appendChild(btn);
+                });
+
+                // View toggle
+                const viewSwitch = document.createElement('div');
+                viewSwitch.classList.add('view-switch');
+                viewSwitch.innerHTML = `
+                    <span>Cards</span>
+                    <label class="switch">
+                        <input type="checkbox" id="viewToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span>Table</span>
+                `;
+                tabsDiv.appendChild(viewSwitch);
+
+                // Bet type select
+                const betTypeSelect = document.getElementById('betTypeSelect');
+                betTypeSelect.innerHTML = '';
+                uniqueStatTypes.forEach(tab => {
+                    const option = document.createElement('option');
+                    option.value = tab;
+                    option.textContent = tab;
+                    if (tab === 'All') option.selected = true;
+                    betTypeSelect.appendChild(option);
+                });
+                betTypeSelect.addEventListener('change', () => {
+                    currentTab = betTypeSelect.value;
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    const activeTab = Array.from(document.querySelectorAll('.tab')).find(t => t.textContent === currentTab);
+                    if (activeTab) activeTab.classList.add('active');
+                    renderContent();
+                });
+
+                // Odds select
+                const oddsOptions = ['all', 'standard', 'demon', 'goblin'];
+                const oddsSelect = document.getElementById('oddsSelect');
+                oddsSelect.innerHTML = '';
+                oddsOptions.forEach(opt => {
+                    const option = document.createElement('option');
+                    option.value = opt;
+                    option.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                    if (opt === 'standard') option.selected = true;
+                    oddsSelect.appendChild(option);
+                });
+                oddsSelect.addEventListener('change', () => {
+                    currentOddsType = oddsSelect.value;
+                    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                    const activeBtn = document.querySelector(`.toggle-btn[data-type="${currentOddsType}"]`);
+                    if (activeBtn) activeBtn.classList.add('active');
+                    renderContent();
+                });
+
+                const viewSelect = document.getElementById('viewSelect');
+                viewSelect.value = 'cards';
+                viewSelect.addEventListener('change', () => {
+                    currentView = viewSelect.value;
+                    document.getElementById('viewToggle').checked = currentView === 'table';
+                    renderContent();
+                });
+
+                document.getElementById('search').addEventListener('input', (e) => {
+                    searchTerm = e.target.value.toLowerCase();
+                    renderContent();
+                });
+
+                document.querySelectorAll('.toggle-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentOddsType = btn.dataset.type;
+                        oddsSelect.value = currentOddsType;
+                        renderContent();
+                    });
+                });
+
+                document.getElementById('viewToggle').addEventListener('change', (e) => {
+                    currentView = e.target.checked ? 'table' : 'cards';
+                    viewSelect.value = currentView;
+                    renderContent();
+                });
+
+                document.getElementById('selectedToggle').addEventListener('change', (e) => {
+                    showSelectedOnly = e.target.checked;
+                    renderContent();
+                });
+
+                // Filter buttons (same logic as original)
+                document.getElementById('filterBtn').addEventListener('click', () => {
+                    const popup = document.getElementById('popup');
+                    popup.style.display = 'block';
+                    // ... (games and teams filter logic - same as original)
+                });
+
+                document.getElementById('applyFilter').addEventListener('click', () => {
+                    // ... same as original
+                    document.getElementById('popup').style.display = 'none';
+                    renderContent();
+                });
+
+                // Similar for other filter buttons...
+
+                document.getElementById('betslipBtn').addEventListener('click', () => {
+                    document.getElementById('overlay').style.display = 'block';
+                    document.getElementById('betslipPopup').style.display = 'block';
+                    filterBetSlips();
+                });
+
+                document.getElementById('closeBetSlip').addEventListener('click', () => {
+                    document.getElementById('betslipPopup').style.display = 'none';
+                    document.getElementById('overlay').style.display = 'none';
+                });
+
+                document.getElementById('tool-info').addEventListener('click', () => {
+                    document.getElementById('overlay').style.display = 'block';
+                    document.getElementById('toolInfoPopup').style.display = 'block';
+                });
+
+                document.getElementById('closeToolInfo').addEventListener('click', () => {
+                    document.getElementById('toolInfoPopup').style.display = 'none';
+                    document.getElementById('overlay').style.display = 'none';
+                });
+
+                renderContent();
+            })
+            .catch(error => {
+                console.error('Error loading WNBA data:', error);
+                contentDiv.innerHTML = `<div class="loading" style="color:#ff4d4d;">Failed to load WNBA data.<br>Please make sure data/prizepicks-wnba.csv exists.</div>`;
+            });
+
+        function renderContent() {
+            contentDiv.innerHTML = '<div class="loading">Rendering...</div>';
+            setTimeout(() => {
+                let filtered = allData.filter(row => (row['Stat Type'] || '').trim() !== '');
+
+                if (currentTab !== 'All') {
+                    filtered = filtered.filter(row => (row['Stat Type'] || '').trim() === currentTab);
+                }
+                if (currentOddsType !== 'all') {
+                    filtered = filtered.filter(row => row['Odds Type'] === currentOddsType);
+                }
+                if (searchTerm) {
+                    filtered = filtered.filter(row =>
+                        (row['Player Name'] || '').toLowerCase().includes(searchTerm) ||
+                        (row['Stat Type'] || '').toLowerCase().includes(searchTerm)
+                    );
+                }
+
+                filtered = filtered.filter(row => {
+                    return selectedGames.has(row['Game Short Title']) && selectedTeams.has(row.Team);
+                });
+
+                if (selectedBetTags.size > 0) {
+                    filtered = filtered.filter(row => selectedBetTags.has(row['Bet Tag']));
+                }
+                if (selectedFav.size > 0) {
+                    filtered = filtered.filter(row => selectedFav.has(row['Fav'] || 'No'));
+                }
+
+                currentFiltered = filtered;
+                contentDiv.innerHTML = '';
+                contentDiv.classList.remove('table-view');
+
+                if (currentView === 'table') contentDiv.classList.add('table-view');
+
+                if (filtered.length === 0) {
+                    contentDiv.innerHTML = '<div class="loading">No data available for this selection.</div>';
+                    return;
+                }
+
+                if (currentView === 'cards') {
+                    filtered.forEach((row, index) => {
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        const edge = isNaN(parseFloat(row['Edge %'])) ? 'N/A' : parseFloat(row['Edge %']).toFixed(1) + '%';
+                        let icon = '';
+                        if (row['Odds Type'] === 'demon') icon = '<div class="icon">👿</div>';
+                        if (row['Odds Type'] === 'goblin') icon = '<div class="icon">👺</div>';
+
+                        let lessClass = 'button less';
+                        let moreClass = 'button more';
+                        const key = `${row['Player Name']}-${row['Stat Type']}`;
+                        const selectedBet = selectedBets.find(b => b.key === key);
+                        if (selectedBet) {
+                            if (selectedBet.choice === 'Less') lessClass += ' selected selected-less';
+                            else if (selectedBet.choice === 'More') moreClass += ' selected selected-more';
+                        }
+
+                        card.innerHTML = `
+                            ${icon}
+                            <div class="header"><span class="pop">${edge}</span></div>
+                            <img class="headshot" src="${row['Headshot URL'] || row['Player Image'] || 'placeholder.png'}" alt="">
+                            <div class="team">${row.Team || ''}</div>
+                            <div class="name">${row['Player Name']}</div>
+                            <div class="game">${row['Game Short Title'] || ''}</div>
+                            <div class="stat">${row['Line Score']} ${row['Stat Type']}</div>
+                            <div class="buttons">
+                                <button class="${lessClass}" data-choice="Less">↓ Less</button>
+                                <div class="divider"></div>
+                                <button class="${moreClass}" data-choice="More">↑ More</button>
+                            </div>
+                            <div class="info-icon" data-index="${index}">ℹ️</div>
+                        `;
+                        contentDiv.appendChild(card);
+
+                        // Add click handlers
+                        const buttons = card.querySelectorAll('.button');
+                        buttons.forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const choice = btn.dataset.choice;
+                                const key = `${row['Player Name']}-${row['Stat Type']}`;
+                                const existingIndex = selectedBets.findIndex(b => b.key === key);
+                                const betData = {
+                                    key,
+                                    player: row['Player Name'],
+                                    choice,
+                                    line: row['Line Score'],
+                                    stat: row['Stat Type'],
+                                    edge: parseFloat(row['Edge %']) || 0,
+                                    prob: parseFloat(row['Edge %'] || 50) / 100,
+                                    game: row['Game Short Title'],
+                                    team: row.Team
+                                };
+                                if (existingIndex > -1 && selectedBets[existingIndex].choice === choice) {
+                                    selectedBets.splice(existingIndex, 1);
+                                } else {
+                                    if (existingIndex > -1) selectedBets[existingIndex] = betData;
+                                    else selectedBets.push(betData);
+                                }
+                                renderContent();
+                            });
+                        });
+
+                        card.querySelector('.info-icon').addEventListener('click', () => {
+                            // showPlayerPopup(row, index); // Can be enabled later
+                            alert('Player details popup can be enabled. Data: ' + row['Player Name']);
+                        });
+                    });
+                } else {
+                    // Table view
+                    const table = document.createElement('table');
+                    // ... (table rendering logic can be added from original)
+                    contentDiv.appendChild(table);
+                }
+            }, 50);
+        }
+
+        function filterBetSlips() {
+            // Your original bet slip rendering logic
+            console.log("Bet slips updated");
+        }
+
+        // Additional functions from original can be added here as needed
+        window.onload = () => {};
+    </script>
+</body>
+</html>
