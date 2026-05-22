@@ -1,0 +1,30 @@
+name: Update WNBA PrizePicks Data
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Download latest WNBA data from Google Sheets
+        run: |
+          curl -L -o data/prizepicks-wnba.csv \
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vRsopuNNvgPQEQBFP3JGqYf9LXHTO1sGdip73gkFTEjFw_RVVie4_ycGHC7g6RuunLvCk7yJdFp4ZxQ/pub?gid=0&single=true&output=csv"
+
+      - name: Commit and push if changed
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "Auto-update WNBA PrizePicks data"
+          file_pattern: data/prizepicks-wnba.csv
+          branch: main
