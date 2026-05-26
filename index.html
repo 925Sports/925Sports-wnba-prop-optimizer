@@ -618,8 +618,7 @@
             selectedGameTypes = new Set(['High', 'Normal', 'Low']);
             selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
             let uniqueStatTypes = ['All', ...new Set(allData.map(row => (row['Stat Type'] || '').trim()).filter(Boolean))].sort();
-            if (!uniqueStatTypes.includes('Hitter Fantasy Score')) uniqueStatTypes.push('Hitter Fantasy Score');
-            if (!uniqueStatTypes.includes('Pitcher Fantasy Score')) uniqueStatTypes.push('Pitcher Fantasy Score');
+            // Removed Hitter/Pitcher Fantasy Score for WNBA
             uniqueStatTypes.sort();
             const tabsDiv = document.querySelector('.tabs');
             tabsDiv.innerHTML = '';
