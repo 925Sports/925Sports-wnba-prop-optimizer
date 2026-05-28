@@ -400,8 +400,8 @@
             <option value="table">Table</option>
         </select>
         <div class="toggle">
-            <button class="toggle-btn active" data-type="all">All</button>
-            <button class="toggle-btn" data-type="standard">Standard</button>
+            <button class="toggle-btn" data-type="all">All</button>
+            <button class="toggle-btn active" data-type="standard">Standard</button>
             <button class="toggle-btn" data-type="demon">Demon</button>
             <button class="toggle-btn" data-type="goblin">Goblin</button>
         </div>
@@ -477,6 +477,10 @@
         <button id="selectAllGameTypes" class="select-btn">Select All</button>
         <button id="deselectAllGameTypes" class="select-btn">Deselect All</button>
         <div id="gameTypesList"></div>
+        <h3>Hot / Cold Batter</h3>
+        <button id="selectAllHotCold" class="select-btn">Select All</button>
+        <button id="deselectAllHotCold" class="select-btn">Deselect All</button>
+        <div id="hotColdList"></div>
     </div>
 
     <!-- Bet Slip Popup -->
@@ -488,9 +492,7 @@
             <select id="payoutFilter" onchange="filterBetSlips()">
                 <option value="all">All</option>
                 <option value="3X">3X</option>
-                <option value="4X">4X</option>
                 <option value="6X">6X</option>
-                <option value="7X">7X</option>
                 <option value="10X">10X</option>
                 <option value="25X">25X</option>
             </select>
@@ -510,7 +512,7 @@
         <p>This tool helps you optimize your WNBA bets on PrizePicks.</p>
         <ul>
             <li>Use the search bar to find players or stats.</li>
-            <li>Filter by games, teams, callouts, bet tags, fav status, or game scoring using the buttons.</li>
+            <li>Filter by games, teams, callouts, bet tags, fav status, game scoring, or hot/cold using the buttons.</li>
             <li>Select odds type: All, Standard, Demon, or Goblin.</li>
             <li>Switch tabs to view different stat categories.</li>
             <li>On each player card, click 'More' or 'Less' to add bets to your slip.</li>
@@ -537,6 +539,7 @@
         let selectedBetTags = new Set();
         let selectedFav = new Set();
         let selectedGameTypes = new Set();
+        let selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
         let selectedBets = [];
         let selectedPayout = 'all';
         let betSlipsSortColumn = 'Edge';
@@ -547,10 +550,446 @@
         let currentRow = null;
         let gameToTime = new Map();
         let showSelectedOnly = false;
+
         const contentDiv = document.getElementById('content');
         contentDiv.innerHTML = '<div class="loading">Loading WNBA data + game logs...</div>';
+
         const prizePicksUrl = './data/prizepicks-wnba.csv';
         const gameLogUrl = "https://raw.githubusercontent.com/925Sports/mlb-player-game-logs/refs/heads/main/mlb_2026_season_game_logs.csv";
+
+        Promise.all([
+            fetch(prizePicksUrl).then(res => res.text()),
+            fetch(gameLogUrl).then(res => res.text())
+        ])
+        .then(([ppCsv, logCsv]) => {
+            allData = Papa.parse(ppCsv, { header: true, skipEmptyLines: true }).data;
+            gameLogs = Papa.parse(logCsv, { header: true, skipEmptyLines: true }).data;
+
+            allData.forEach(row => {
+                if (row['Game Short Title'] && row['Scheduled At'] && !gameToTime.has(row['Game Short Title'])) {
+                    gameToTime.set(row['Game Short Title'], row['Scheduled At']);
+                }
+            });
+
+            uniqueGames = Array.from(gameToTime.entries()).sort((a, b) => new Date(a[1]) - new Date(b[1])).map(entry => entry[0]);
+            uniqueTeams = [...new Set(allData.map(row => row.Team).filter(Boolean))].sort();
+            uniqueCallouts = [...new Set(allData.map(row => (row['Callout Bet Tag'] || '').trim()))].sort();
+            uniqueBetTags = [...new Set(allData.map(row => (row['Bet Tag'] || '').trim()))].sort();
+
+            selectedGames = new Set(uniqueGames);
+            selectedTeams = new Set(uniqueTeams);
+            selectedCallouts = new Set(uniqueCallouts);
+            selectedBetTags = new Set(uniqueBetTags);
+            selectedFav = new Set(['Yes', 'No']);
+            selectedGameTypes = new Set(['High', 'Normal', 'Low']);
+            selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
+
+            let uniqueStatTypes = ['All', ...new Set(allData.map(row => (row['Stat Type'] || '').trim()).filter(Boolean))].sort();
+
+            const tabsDiv = document.querySelector('.tabs');
+            tabsDiv.innerHTML = '';
+            uniqueStatTypes.forEach((tab, index) => {
+                const btn = document.createElement('div');
+                btn.classList.add('tab');
+                if (tab === 'All') btn.classList.add('active');
+                btn.textContent = tab;
+                btn.onclick = () => {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentTab = tab;
+                    document.getElementById('betTypeSelect').value = tab;
+                    renderContent();
+                };
+                tabsDiv.appendChild(btn);
+            });
+
+            const viewSwitch = document.createElement('div');
+            viewSwitch.classList.add('view-switch');
+            viewSwitch.innerHTML = `
+                <span>Cards</span>
+                <label class="switch">
+                    <input type="checkbox" id="viewToggle">
+                    <span class="slider"></span>
+                </label>
+                <span>Table</span>
+            `;
+            tabsDiv.appendChild(viewSwitch);
+
+            const betTypeSelect = document.getElementById('betTypeSelect');
+            betTypeSelect.innerHTML = '';
+            uniqueStatTypes.forEach(tab => {
+                const option = document.createElement('option');
+                option.value = tab;
+                option.textContent = tab;
+                if (tab === 'All') option.selected = true;
+                betTypeSelect.appendChild(option);
+            });
+            betTypeSelect.addEventListener('change', () => {
+                currentTab = betTypeSelect.value;
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                const activeTab = Array.from(document.querySelectorAll('.tab')).find(t => t.textContent === currentTab);
+                if (activeTab) activeTab.classList.add('active');
+                renderContent();
+            });
+
+            const oddsOptions = ['all', 'standard', 'demon', 'goblin'];
+            const oddsSelect = document.getElementById('oddsSelect');
+            oddsSelect.innerHTML = '';
+            oddsOptions.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt;
+                option.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                if (opt === 'standard') option.selected = true;
+                oddsSelect.appendChild(option);
+            });
+            oddsSelect.addEventListener('change', () => {
+                currentOddsType = oddsSelect.value;
+                document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                const activeBtn = document.querySelector(`.toggle-btn[data-type="${currentOddsType}"]`);
+                if (activeBtn) activeBtn.classList.add('active');
+                renderContent();
+            });
+
+            const viewSelect = document.getElementById('viewSelect');
+            viewSelect.value = 'cards';
+            viewSelect.addEventListener('change', () => {
+                currentView = viewSelect.value;
+                document.getElementById('viewToggle').checked = currentView === 'table';
+                renderContent();
+            });
+
+            document.getElementById('search').addEventListener('input', (e) => {
+                searchTerm = e.target.value.toLowerCase();
+                renderContent();
+            });
+
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentOddsType = btn.dataset.type;
+                    oddsSelect.value = currentOddsType;
+                    renderContent();
+                });
+            });
+
+            document.getElementById('viewToggle').addEventListener('change', (e) => {
+                currentView = e.target.checked ? 'table' : 'cards';
+                viewSelect.value = currentView;
+                renderContent();
+            });
+
+            document.getElementById('selectedToggle').addEventListener('change', (e) => {
+                showSelectedOnly = e.target.checked;
+                renderContent();
+            });
+
+            document.getElementById('filterBtn').addEventListener('click', () => {
+                const popup = document.getElementById('popup');
+                popup.style.display = 'block';
+                const gamesList = document.getElementById('gamesList');
+                gamesList.innerHTML = '';
+                uniqueGames.forEach(game => {
+                    const time = gameToTime.get(game);
+                    let displayText = game;
+                    if (time) {
+                        const date = new Date(time);
+                        const formatted = date.toLocaleString('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+                        displayText += ` (${formatted})`;
+                    }
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = game;
+                    checkbox.checked = selectedGames.has(game);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(displayText));
+                    gamesList.appendChild(label);
+                    gamesList.appendChild(document.createElement('br'));
+                });
+                const teamsList = document.getElementById('teamsList');
+                teamsList.innerHTML = '';
+                uniqueTeams.forEach(team => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = team;
+                    checkbox.checked = selectedTeams.has(team);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(team));
+                    teamsList.appendChild(label);
+                    teamsList.appendChild(document.createElement('br'));
+                });
+                document.getElementById('selectAllGames').onclick = () => gamesList.querySelectorAll('input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllGames').onclick = () => gamesList.querySelectorAll('input').forEach(cb => cb.checked = false);
+                document.getElementById('selectAllTeams').onclick = () => teamsList.querySelectorAll('input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllTeams').onclick = () => teamsList.querySelectorAll('input').forEach(cb => cb.checked = false);
+            });
+
+            document.getElementById('applyFilter').addEventListener('click', () => {
+                selectedGames = new Set(Array.from(document.getElementById('gamesList').querySelectorAll('input:checked')).map(cb => cb.value));
+                selectedTeams = new Set(Array.from(document.getElementById('teamsList').querySelectorAll('input:checked')).map(cb => cb.value));
+                document.getElementById('popup').style.display = 'none';
+                renderContent();
+            });
+
+            document.getElementById('calloutFilterBtn').addEventListener('click', () => {
+                const popup = document.getElementById('calloutPopup');
+                popup.style.display = 'block';
+                const calloutsList = document.getElementById('calloutsList');
+                calloutsList.innerHTML = '';
+                uniqueCallouts.forEach(callout => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = callout;
+                    checkbox.checked = selectedCallouts.has(callout);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(callout || '(no tag)'));
+                    calloutsList.appendChild(label);
+                    calloutsList.appendChild(document.createElement('br'));
+                });
+                document.getElementById('selectAllCallouts').onclick = () => calloutsList.querySelectorAll('input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllCallouts').onclick = () => calloutsList.querySelectorAll('input').forEach(cb => cb.checked = false);
+            });
+
+            document.getElementById('applyCalloutFilter').addEventListener('click', () => {
+                selectedCallouts = new Set(Array.from(document.getElementById('calloutsList').querySelectorAll('input:checked')).map(cb => cb.value));
+                document.getElementById('calloutPopup').style.display = 'none';
+                renderContent();
+            });
+
+            document.getElementById('advancedFilterBtn').addEventListener('click', () => {
+                const popup = document.getElementById('advancedFilterPopup');
+                popup.style.display = 'block';
+                const betTagsList = document.getElementById('betTagsList');
+                betTagsList.innerHTML = '';
+                uniqueBetTags.forEach(tag => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = tag;
+                    checkbox.checked = selectedBetTags.has(tag);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(tag || '(no tag)'));
+                    betTagsList.appendChild(label);
+                    betTagsList.appendChild(document.createElement('br'));
+                });
+                const favList = document.getElementById('favList');
+                favList.innerHTML = '';
+                ['Yes', 'No'].forEach(fav => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = fav;
+                    checkbox.checked = selectedFav.has(fav);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(fav));
+                    favList.appendChild(label);
+                    favList.appendChild(document.createElement('br'));
+                });
+                const gameTypesList = document.getElementById('gameTypesList');
+                gameTypesList.innerHTML = '';
+                ['High', 'Normal', 'Low'].forEach(type => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = type;
+                    checkbox.checked = selectedGameTypes.has(type);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(type + ' Scoring'));
+                    gameTypesList.appendChild(label);
+                    gameTypesList.appendChild(document.createElement('br'));
+                });
+                const hotColdList = document.getElementById('hotColdList');
+                hotColdList.innerHTML = '';
+                ['Hot', 'Cold', 'Neutral'].forEach(status => {
+                    const label = document.createElement('label');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = status;
+                    checkbox.checked = selectedHotCold.has(status);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(status + ' Batter'));
+                    hotColdList.appendChild(label);
+                    hotColdList.appendChild(document.createElement('br'));
+                });
+                document.getElementById('selectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = false);
+                document.getElementById('selectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = false);
+                document.getElementById('selectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = false);
+                document.getElementById('selectAllHotCold').onclick = () => document.querySelectorAll('#hotColdList input').forEach(cb => cb.checked = true);
+                document.getElementById('deselectAllHotCold').onclick = () => document.querySelectorAll('#hotColdList input').forEach(cb => cb.checked = false);
+            });
+
+            document.getElementById('applyAdvancedFilter').addEventListener('click', () => {
+                selectedBetTags = new Set(Array.from(document.querySelectorAll('#betTagsList input:checked')).map(cb => cb.value));
+                selectedFav = new Set(Array.from(document.querySelectorAll('#favList input:checked')).map(cb => cb.value));
+                selectedGameTypes = new Set(Array.from(document.querySelectorAll('#gameTypesList input:checked')).map(cb => cb.value));
+                selectedHotCold = new Set(Array.from(document.querySelectorAll('#hotColdList input:checked')).map(cb => cb.value));
+                document.getElementById('advancedFilterPopup').style.display = 'none';
+                renderContent();
+            });
+
+            document.getElementById('betslipBtn').addEventListener('click', () => {
+                document.getElementById('overlay').style.display = 'block';
+                document.getElementById('betslipPopup').style.display = 'block';
+                renderBetSlips();
+            });
+
+            document.getElementById('closeBetSlip').addEventListener('click', () => {
+                document.getElementById('betslipPopup').style.display = 'none';
+                document.getElementById('overlay').style.display = 'none';
+            });
+
+            document.getElementById('tool-info').addEventListener('click', () => {
+                document.getElementById('overlay').style.display = 'block';
+                document.getElementById('toolInfoPopup').style.display = 'block';
+            });
+            document.getElementById('closeToolInfo').addEventListener('click', () => {
+                document.getElementById('toolInfoPopup').style.display = 'none';
+                document.getElementById('overlay').style.display = 'none';
+            });
+
+            renderContent();
+        })
+        .catch(error => {
+            console.error('Error fetching CSV:', error);
+            contentDiv.innerHTML = `<div class="loading" style="color:#ff4d4d;">Data is loading...<br>Please try again later or refresh the page.</div>`;
+        });
+
+        function getGameType(ou) {
+            const total = parseFloat(ou || 0);
+            if (total >= 175) return 'High';
+            if (total <= 165) return 'Low';
+            return 'Normal';
+        }
+
+        function cleanName(name) {
+            if (!name) return '';
+            return name.toLowerCase().trim().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ');
+        }
+        function nameMatches(logName, playerName) {
+            const cleanLog = cleanName(logName);
+            const cleanPlayer = cleanName(playerName);
+            if (cleanLog === cleanPlayer) return true;
+            const logParts = cleanLog.split(' ');
+            const playerParts = cleanPlayer.split(' ');
+            if (logParts[logParts.length - 1] === playerParts[playerParts.length - 1]) return true;
+            return false;
+        }
+        function calculateFantasyScore(log, isHitter) {
+            if (isHitter) {
+                const singles = parseFloat(log.hits || log.H || 0) - parseFloat(log.doubles || 0) - parseFloat(log.triples || 0) - parseFloat(log.homeRuns || log.HR || 0);
+                const doubles = parseFloat(log.doubles || 0);
+                const triples = parseFloat(log.triples || 0);
+                const hr = parseFloat(log.homeRuns || log.HR || 0);
+                const runs = parseFloat(log.runs || log.R || 0);
+                const rbi = parseFloat(log.rbi || log.RBI || 0);
+                const bb = parseFloat(log.baseOnBalls || log.BB || 0);
+                const hbp = parseFloat(log.hitByPitch || log.HBP || 0);
+                const sb = parseFloat(log.stolenBases || log.SB || 0);
+                return (singles * 3) + (doubles * 5) + (triples * 8) + (hr * 10) + (runs * 2) + (rbi * 2) + (bb * 2) + (hbp * 2) + (sb * 5);
+            } else {
+                const ip = parseFloat(log.inningsPitched || log.IP || 0);
+                const outs = ip * 3;
+                const er = parseFloat(log.earnedRuns || log.ER || 0);
+                const k = parseFloat(log.strikeOutsPitching || log.strikeOuts || log.K || 0);
+                const decision = (log.decision || log.Decision || '').toUpperCase();
+                const win = decision === 'W' ? 6 : 0;
+                const qs = (ip >= 6 && er < 3) ? 4 : 0;
+                return win + qs + outs + (k * 3) - (er * 3);
+            }
+        }
+        function getBBFromSummary(summary) {
+            if (!summary) return 0;
+            const match = summary.match(/(\d+)\s*BB/);
+            return match ? parseFloat(match[1]) : 0;
+        }
+        function getStatValue(log, statType) {
+            if (!log || !statType) return 0;
+            const lowerStat = statType.toLowerCase().trim();
+            if (lowerStat.includes('fantasy score')) {
+                const isHitter = !lowerStat.includes('pitcher');
+                return calculateFantasyScore(log, isHitter);
+            }
+            if ((lowerStat.includes('strikeout') || lowerStat.includes('k') || lowerStat.includes('so')) && 
+                !lowerStat.includes('walk') && !lowerStat.includes('bb')) {
+                return parseFloat(log.strikeOutsPitching || log.strikeOuts || log.K || log.SO || 0);
+            }
+            if (lowerStat.includes('h+r') || lowerStat.includes('hits+runs') || 
+                lowerStat.includes('hits + runs + rbi') || lowerStat.includes('hits + runs + rbis') ||
+                lowerStat.includes('hrrbi') || lowerStat.includes('h + r + rbi') ||
+                lowerStat.includes('hits+runs+rbi')) {
+                const h = parseFloat(log.hits || log.H || 0);
+                const r = parseFloat(log.runs || log.R || 0);
+                const rb = parseFloat(log.rbi || log.RBI || 0);
+                return h + r + rb;
+            }
+            if (lowerStat === 'hits' || (lowerStat.includes('hit') && !lowerStat.includes('+') && !lowerStat.includes('rbi'))) {
+                return parseFloat(log.hits || log.H || 0);
+            }
+            if (lowerStat === 'runs' || (lowerStat.includes('run') && !lowerStat.includes('+') && !lowerStat.includes('rbi'))) {
+                return parseFloat(log.runs || log.R || 0);
+            }
+            if (lowerStat.includes('rbi')) {
+                return parseFloat(log.rbi || log.RBI || 0);
+            }
+            if (lowerStat.includes('home run') || lowerStat.includes('hr')) {
+                return parseFloat(log.homeRuns || log.HR || 0);
+            }
+            if (lowerStat.includes('inning') || lowerStat.includes('ip')) {
+                return parseFloat(log.inningsPitched || log.IP || 0);
+            }
+            if (lowerStat.includes('earned run') || lowerStat.includes('er')) {
+                return parseFloat(log.earnedRuns || log.ER || 0);
+            }
+            if (lowerStat.includes('walk') || lowerStat.includes('bb') || 
+                lowerStat.includes('base on balls') || lowerStat.includes('baseonballs')) {
+                let val = parseFloat(log.baseOnBalls || log.BB || log.baseOnBallsPitching || 0);
+                if ((isNaN(val) || val === 0) && (log.gameLogSummary || log.Summary)) {
+                    val = getBBFromSummary(log.gameLogSummary || log.Summary);
+                }
+                return val || 0;
+            }
+            if (lowerStat.includes('at bat') || lowerStat.includes('ab')) {
+                return parseFloat(log.atBats || log.AB || 0);
+            }
+            const possibleKeys = [statType, statType.replace(/\s+/g, ''), statType.toLowerCase()];
+            for (let key of possibleKeys) {
+                if (log[key] !== undefined) return parseFloat(log[key]);
+            }
+            return 0;
+        }
+        function getHotColdStatus(playerName) {
+            if (!gameLogs || gameLogs.length === 0) return 'Neutral';
+            const matchingLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', playerName));
+            if (matchingLogs.length === 0) return 'Neutral';
+            const recent = matchingLogs.slice(0, 7);
+            let hits = 0, ab = 0;
+            recent.forEach(log => {
+                hits += parseFloat(log.hits || log.H || 0);
+                ab += parseFloat(log.atBats || log.AB || 0);
+            });
+            if (ab < 10) return 'Neutral';
+            const ba = hits / ab;
+            if (ba >= 0.320) return 'Hot';
+            if (ba <= 0.180) return 'Cold';
+            return 'Neutral';
+        }
+        function getGameLogStats(playerName, statType) {
+            if (!playerName || !statType || !gameLogs || gameLogs.length === 0) return null;
+            let matchingLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', playerName));
+            if (matchingLogs.length === 0) return null;
+            matchingLogs.sort((a, b) => new Date(b.gameDate || b['gameDate'] || b.date || 0) - new Date(a.gameDate || a['gameDate'] || a.date || 0));
+            const last5 = matchingLogs.slice(0, 5);
+            let total = 0;
+            last5.forEach(log => total += getStatValue(log, statType));
+            return (total / last5.length).toFixed(2);
+        }
+
         const predefinedCombinations = {
             2: [[1,2], [1,3], [1,4], [1,5], [1,6], [1,7], [1,8], [1,9], [1,10],
                 [2,3], [2,4], [2,5], [2,6], [2,7], [2,8], [2,9], [2,10],
@@ -597,753 +1036,492 @@
                 [4,5,6,7,8,10], [4,5,6,7,9,10], [4,5,7,8,9,10], [5,6,7,8,9,10]]
         };
 
-        Promise.all([
-            fetch(prizePicksUrl).then(res => res.text()),
-            fetch(gameLogUrl).then(res => res.text())
-        ])
-        .then(([ppCsv, logCsv]) => {
-            allData = Papa.parse(ppCsv, { header: true, skipEmptyLines: true }).data;
-            gameLogs = Papa.parse(logCsv, { header: true, skipEmptyLines: true }).data;
-            allData.forEach(row => {
-                if (row['Game Short Title'] && row['Scheduled At'] && !gameToTime.has(row['Game Short Title'])) {
-                    gameToTime.set(row['Game Short Title'], row['Scheduled At']);
-                }
-            });
-            uniqueGames = Array.from(gameToTime.entries()).sort((a, b) => new Date(a[1]) - new Date(b[1])).map(entry => entry[0]);
-            uniqueTeams = [...new Set(allData.map(row => row.Team).filter(Boolean))].sort();
-            uniqueCallouts = [...new Set(allData.map(row => row['Callout Bet Tag']).filter(Boolean))].sort();
-            uniqueBetTags = [...new Set(allData.map(row => row['Bet Tag']).filter(Boolean))].sort();
-            selectedGames = new Set(uniqueGames);
-            selectedTeams = new Set(uniqueTeams);
-            selectedCallouts = new Set(uniqueCallouts);
-            selectedBetTags = new Set(uniqueBetTags);
-            selectedFav = new Set(['Yes', 'No']);
-            selectedGameTypes = new Set(['High', 'Normal', 'Low']);
-            let uniqueStatTypes = ['All', ...new Set(allData.map(row => (row['Stat Type'] || '').trim()).filter(Boolean))].sort();
-            uniqueStatTypes.sort();
-            const tabsDiv = document.querySelector('.tabs');
-            tabsDiv.innerHTML = '';
-            uniqueStatTypes.forEach((tab, index) => {
-                const btn = document.createElement('div');
-                btn.classList.add('tab');
-                if (index === 0) btn.classList.add('active');
-                btn.textContent = tab;
-                btn.onclick = () => {
-                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                    btn.classList.add('active');
-                    currentTab = tab;
-                    document.getElementById('betTypeSelect').value = tab;
-                    renderContent();
-                };
-                tabsDiv.appendChild(btn);
-            });
-            const viewSwitch = document.createElement('div');
-            viewSwitch.classList.add('view-switch');
-            viewSwitch.innerHTML = `
-                <span>Cards</span>
-                <label class="switch">
-                    <input type="checkbox" id="viewToggle">
-                    <span class="slider"></span>
-                </label>
-                <span>Table</span>
-            `;
-            tabsDiv.appendChild(viewSwitch);
-            const betTypeSelect = document.getElementById('betTypeSelect');
-            betTypeSelect.innerHTML = '';
-            uniqueStatTypes.forEach(tab => {
-                const option = document.createElement('option');
-                option.value = tab;
-                option.textContent = tab;
-                if (tab === 'All') option.selected = true;
-                betTypeSelect.appendChild(option);
-            });
-            betTypeSelect.addEventListener('change', () => {
-                currentTab = betTypeSelect.value;
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                const activeTab = Array.from(document.querySelectorAll('.tab')).find(t => t.textContent === currentTab);
-                if (activeTab) activeTab.classList.add('active');
-                renderContent();
-            });
-            const oddsOptions = ['all', 'standard', 'demon', 'goblin'];
-            const oddsSelect = document.getElementById('oddsSelect');
-            oddsSelect.innerHTML = '';
-            oddsOptions.forEach(opt => {
-                const option = document.createElement('option');
-                option.value = opt;
-                option.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
-                if (opt === 'standard') option.selected = true;
-                oddsSelect.appendChild(option);
-            });
-            oddsSelect.addEventListener('change', () => {
-                currentOddsType = oddsSelect.value;
-                document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-                const activeBtn = document.querySelector(`.toggle-btn[data-type="${currentOddsType}"]`);
-                if (activeBtn) activeBtn.classList.add('active');
-                renderContent();
-            });
-            const viewSelect = document.getElementById('viewSelect');
-            viewSelect.value = 'cards';
-            viewSelect.addEventListener('change', () => {
-                currentView = viewSelect.value;
-                document.getElementById('viewToggle').checked = currentView === 'table';
-                renderContent();
-            });
-            document.getElementById('search').addEventListener('input', (e) => {
-                searchTerm = e.target.value.toLowerCase();
-                renderContent();
-            });
-            document.querySelectorAll('.toggle-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    currentOddsType = btn.dataset.type;
-                    oddsSelect.value = currentOddsType;
-                    renderContent();
-                });
-            });
-            document.getElementById('viewToggle').addEventListener('change', (e) => {
-                currentView = e.target.checked ? 'table' : 'cards';
-                viewSelect.value = currentView;
-                renderContent();
-            });
-            document.getElementById('selectedToggle').addEventListener('change', (e) => {
-                showSelectedOnly = e.target.checked;
-                renderContent();
-            });
-            document.getElementById('filterBtn').addEventListener('click', () => {
-                const popup = document.getElementById('popup');
-                popup.style.display = 'block';
-                const gamesList = document.getElementById('gamesList');
-                gamesList.innerHTML = '';
-                uniqueGames.forEach(game => {
-                    const time = gameToTime.get(game);
-                    let displayText = game;
-                    if (time) {
-                        const date = new Date(time);
-                        const formatted = date.toLocaleString('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-                        displayText += ` (${formatted})`;
+        function generateCombinations(bets) {
+            let allCombinations = { 2: [], 3: [], 4: [], 5: [], 6: [] };
+            const betCount = bets.length;
+            if (betCount < 2) return allCombinations;
+            for (let pickcount = 2; pickcount <= Math.min(6, betCount); pickcount++) {
+                const combos = predefinedCombinations[pickcount]
+                    .filter(combo => combo.every(id => id <= betCount))
+                    .map(combo => combo.map(id => id - 1));
+                combos.forEach(combo => {
+                    let valid = true;
+                    let players = new Set();
+                    let productProb = 1;
+                    let comboPlayers = [];
+                    let playerdetails = [];
+                    let projectionEntries = [];
+                    let games = new Set();
+                    for (let idx of combo) {
+                        const bet = bets[idx];
+                        const player = bet.player;
+                        const prob = bet.prob;
+                        const direction = bet.choice.toLowerCase() === 'more' ? 'o' : 'u';
+                        const line = bet.line;
+                        if (!prob || prob <= 0 || prob >= 1) { valid = false; break; }
+                        if (players.has(player)) { valid = false; break; }
+                        players.add(player);
+                        productProb *= prob;
+                        comboPlayers.push(player);
+                        playerdetails.push(bet);
+                        projectionEntries.push(`${bet.id || ''},${bet.projectionId || ''}-${direction}-${line}`);
+                        games.add(bet.game);
                     }
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = game;
-                    checkbox.checked = selectedGames.has(game);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(displayText));
-                    gamesList.appendChild(label);
-                    gamesList.appendChild(document.createElement('br'));
-                });
-                const teamsList = document.getElementById('teamsList');
-                teamsList.innerHTML = '';
-                uniqueTeams.forEach(team => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = team;
-                    checkbox.checked = selectedTeams.has(team);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(team));
-                    teamsList.appendChild(label);
-                    teamsList.appendChild(document.createElement('br'));
-                });
-                document.getElementById('selectAllGames').onclick = () => gamesList.querySelectorAll('input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllGames').onclick = () => gamesList.querySelectorAll('input').forEach(cb => cb.checked = false);
-                document.getElementById('selectAllTeams').onclick = () => teamsList.querySelectorAll('input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllTeams').onclick = () => teamsList.querySelectorAll('input').forEach(cb => cb.checked = false);
-            });
-            document.getElementById('applyFilter').addEventListener('click', () => {
-                selectedGames = new Set(Array.from(document.getElementById('gamesList').querySelectorAll('input:checked')).map(cb => cb.value));
-                selectedTeams = new Set(Array.from(document.getElementById('teamsList').querySelectorAll('input:checked')).map(cb => cb.value));
-                document.getElementById('popup').style.display = 'none';
-                renderContent();
-            });
-            document.getElementById('calloutFilterBtn').addEventListener('click', () => {
-                const popup = document.getElementById('calloutPopup');
-                popup.style.display = 'block';
-                const calloutsList = document.getElementById('calloutsList');
-                calloutsList.innerHTML = '';
-                uniqueCallouts.forEach(callout => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = callout;
-                    checkbox.checked = selectedCallouts.has(callout);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(callout));
-                    calloutsList.appendChild(label);
-                    calloutsList.appendChild(document.createElement('br'));
-                });
-                document.getElementById('selectAllCallouts').onclick = () => calloutsList.querySelectorAll('input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllCallouts').onclick = () => calloutsList.querySelectorAll('input').forEach(cb => cb.checked = false);
-            });
-            document.getElementById('applyCalloutFilter').addEventListener('click', () => {
-                selectedCallouts = new Set(Array.from(document.getElementById('calloutsList').querySelectorAll('input:checked')).map(cb => cb.value));
-                document.getElementById('calloutPopup').style.display = 'none';
-                renderContent();
-            });
-            document.getElementById('advancedFilterBtn').addEventListener('click', () => {
-                const popup = document.getElementById('advancedFilterPopup');
-                popup.style.display = 'block';
-                const betTagsList = document.getElementById('betTagsList');
-                betTagsList.innerHTML = '';
-                uniqueBetTags.forEach(tag => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = tag;
-                    checkbox.checked = selectedBetTags.has(tag);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(tag));
-                    betTagsList.appendChild(label);
-                    betTagsList.appendChild(document.createElement('br'));
-                });
-                const favList = document.getElementById('favList');
-                favList.innerHTML = '';
-                ['Yes', 'No'].forEach(fav => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = fav;
-                    checkbox.checked = selectedFav.has(fav);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(fav));
-                    favList.appendChild(label);
-                    favList.appendChild(document.createElement('br'));
-                });
-                const gameTypesList = document.getElementById('gameTypesList');
-                gameTypesList.innerHTML = '';
-                ['High', 'Normal', 'Low'].forEach(type => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = type;
-                    checkbox.checked = selectedGameTypes.has(type);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(type + ' Scoring'));
-                    gameTypesList.appendChild(label);
-                    gameTypesList.appendChild(document.createElement('br'));
-                });
-                document.getElementById('selectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = false);
-                document.getElementById('selectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = false);
-                document.getElementById('selectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = false);
-            });
-            document.getElementById('applyAdvancedFilter').addEventListener('click', () => {
-                selectedBetTags = new Set(Array.from(document.querySelectorAll('#betTagsList input:checked')).map(cb => cb.value));
-                selectedFav = new Set(Array.from(document.querySelectorAll('#favList input:checked')).map(cb => cb.value));
-                selectedGameTypes = new Set(Array.from(document.querySelectorAll('#gameTypesList input:checked')).map(cb => cb.value));
-                document.getElementById('advancedFilterPopup').style.display = 'none';
-                renderContent();
-            });
-            document.getElementById('betslipBtn').addEventListener('click', () => {
-                document.getElementById('overlay').style.display = 'block';
-                document.getElementById('betslipPopup').style.display = 'block';
-                filterBetSlips();
-            });
-            document.getElementById('closeBetSlip').addEventListener('click', () => {
-                document.getElementById('betslipPopup').style.display = 'none';
-                document.getElementById('overlay').style.display = 'none';
-            });
-            document.getElementById('tool-info').addEventListener('click', () => {
-                document.getElementById('overlay').style.display = 'block';
-                document.getElementById('toolInfoPopup').style.display = 'block';
-            });
-            document.getElementById('closeToolInfo').addEventListener('click', () => {
-                document.getElementById('toolInfoPopup').style.display = 'none';
-                document.getElementById('overlay').style.display = 'none';
-            });
-            document.addEventListener('click', (event) => {
-                const popups = ['popup', 'calloutPopup', 'betslipPopup', 'toolInfoPopup', 'advancedFilterPopup'];
-                popups.forEach(p => {
-                    const popupEl = document.getElementById(p);
-                    const btnId = p === 'popup' ? 'filterBtn' : p === 'calloutPopup' ? 'calloutFilterBtn' : p === 'betslipPopup' ? 'betslipBtn' : p === 'advancedFilterPopup' ? 'advancedFilterBtn' : 'tool-info';
-                    const btn = document.getElementById(btnId);
-                    if (popupEl.style.display === 'block' && !popupEl.contains(event.target) && event.target !== btn) {
-                        popupEl.style.display = 'none';
-                        if (p === 'betslipPopup') document.getElementById('overlay').style.display = 'none';
+                    if (valid) {
+                        let cashLikelihood = productProb * 100;
+                        let breakEven = pickcount === 2 ? 0.33 : pickcount === 3 ? 0.1667 : pickcount === 4 ? 0.10 : pickcount === 5 ? 0.10 : 0.04;
+                        let edge = (productProb - breakEven) * 100;
+                        let payout = pickcount === 2 ? '3X' : pickcount === 3 ? '6X' : pickcount === 4 ? '10X' : pickcount === 5 ? '10X' : '25X';
+                        let gameLabel = games.size === 1 ? Array.from(games)[0] : 'Mixed';
+                        allCombinations[pickcount].push({
+                            sliplink: `https://prizepicks.onelink.me/gCQS/shareEntry?projections=${projectionEntries.join(',')}`,
+                            players: comboPlayers.join(' | '),
+                            playerdetails,
+                            edge: edge,
+                            payout,
+                            pickcount,
+                            cashlikelihood: cashLikelihood,
+                            game: gameLabel
+                        });
                     }
                 });
-            }, true);
-            renderContent();
-        })
-        .catch(error => {
-            console.error('Error fetching CSV:', error);
-            contentDiv.innerHTML = `<div class="loading" style="color:#ff4d4d;">Data is loading...<br>Please try again later or refresh the page.</div>`;
-        });
+            }
+            return allCombinations;
+        }
 
-        function cleanName(name) {
-            if (!name) return '';
-            return name.toLowerCase().trim().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ');
+        function filterBetSlips() {
+            selectedPayout = document.getElementById('payoutFilter').value;
+            renderBetSlips();
         }
-        function nameMatches(logName, playerName) {
-            const cleanLog = cleanName(logName);
-            const cleanPlayer = cleanName(playerName);
-            if (cleanLog === cleanPlayer) return true;
-            const logParts = cleanLog.split(' ');
-            const playerParts = cleanPlayer.split(' ');
-            if (logParts[logParts.length - 1] === playerParts[playerParts.length - 1]) return true;
-            return false;
-        }
-        function calculateFantasyScore(log, isHitter) {
-            if (isHitter) {
-                const singles = parseFloat(log.hits || log.H || 0) - parseFloat(log.doubles || 0) - parseFloat(log.triples || 0) - parseFloat(log.homeRuns || log.HR || 0);
-                const doubles = parseFloat(log.doubles || 0);
-                const triples = parseFloat(log.triples || 0);
-                const hr = parseFloat(log.homeRuns || log.HR || 0);
-                const runs = parseFloat(log.runs || log.R || 0);
-                const rbi = parseFloat(log.rbi || log.RBI || 0);
-                const bb = parseFloat(log.baseOnBalls || log.BB || 0);
-                const hbp = parseFloat(log.hitByPitch || log.HBP || 0);
-                const sb = parseFloat(log.stolenBases || log.SB || 0);
-                return (singles * 3) + (doubles * 5) + (triples * 8) + (hr * 10) + (runs * 2) + (rbi * 2) + (bb * 2) + (hbp * 2) + (sb * 5);
-            } else {
-                const ip = parseFloat(log.inningsPitched || log.IP || 0);
-                const outs = ip * 3;
-                const er = parseFloat(log.earnedRuns || log.ER || 0);
-                const k = parseFloat(log.strikeOutsPitching || log.strikeOuts || log.K || 0);
-                const decision = (log.decision || log.Decision || '').toUpperCase();
-                const win = decision === 'W' ? 6 : 0;
-                const qs = (ip >= 6 && er < 3) ? 4 : 0;
-                return win + qs + outs + (k * 3) - (er * 3);
+
+        function renderBetSlips() {
+            const header = document.getElementById('betslipsHeader');
+            const body = document.getElementById('betslipsBody');
+            header.innerHTML = '';
+            body.innerHTML = '';
+            if (selectedBets.length < 2) {
+                body.innerHTML = '<tr><td colspan="5" class="error-message">Select at least 2 bets to generate slips.</td></tr>';
+                return;
             }
-        }
-        function getBBFromSummary(summary) {
-            if (!summary) return 0;
-            const match = summary.match(/(\d+)\s*BB/);
-            return match ? parseFloat(match[1]) : 0;
-        }
-        function getStatValue(log, statType) {
-            if (!log || !statType) return 0;
-            const lowerStat = statType.toLowerCase().trim();
-            
-            if (lowerStat.includes('fantasy score')) {
-                const isHitter = !lowerStat.includes('pitcher');
-                return calculateFantasyScore(log, isHitter);
-            }
-            
-            if ((lowerStat.includes('strikeout') || lowerStat.includes('k') || lowerStat.includes('so')) && 
-                !lowerStat.includes('walk') && !lowerStat.includes('bb')) {
-                return parseFloat(log.strikeOutsPitching || log.strikeOuts || log.K || log.SO || 0);
-            }
-            
-            if (lowerStat.includes('h+r') || lowerStat.includes('hits+runs') || 
-                lowerStat.includes('hits + runs + rbi') || lowerStat.includes('hits + runs + rbis') ||
-                lowerStat.includes('hrrbi') || lowerStat.includes('h + r + rbi') ||
-                lowerStat.includes('hits+runs+rbi')) {
-                const h = parseFloat(log.hits || log.H || 0);
-                const r = parseFloat(log.runs || log.R || 0);
-                const rb = parseFloat(log.rbi || log.RBI || 0);
-                return h + r + rb;
-            }
-            
-            if (lowerStat === 'hits' || (lowerStat.includes('hit') && !lowerStat.includes('+') && !lowerStat.includes('rbi'))) {
-                return parseFloat(log.hits || log.H || 0);
-            }
-            
-            if (lowerStat === 'runs' || (lowerStat.includes('run') && !lowerStat.includes('+') && !lowerStat.includes('rbi'))) {
-                return parseFloat(log.runs || log.R || 0);
-            }
-            
-            if (lowerStat.includes('rbi')) {
-                return parseFloat(log.rbi || log.RBI || 0);
-            }
-            
-            if (lowerStat.includes('home run') || lowerStat.includes('hr')) {
-                return parseFloat(log.homeRuns || log.HR || 0);
-            }
-            
-            if (lowerStat.includes('inning') || lowerStat.includes('ip')) {
-                return parseFloat(log.inningsPitched || log.IP || 0);
-            }
-            
-            if (lowerStat.includes('earned run') || lowerStat.includes('er')) {
-                return parseFloat(log.earnedRuns || log.ER || 0);
-            }
-            
-            if (lowerStat.includes('walk') || lowerStat.includes('bb') || 
-                lowerStat.includes('base on balls') || lowerStat.includes('baseonballs')) {
-                let val = parseFloat(log.baseOnBalls || log.BB || log.baseOnBallsPitching || 0);
-                if ((isNaN(val) || val === 0) && (log.gameLogSummary || log.Summary)) {
-                    val = getBBFromSummary(log.gameLogSummary || log.Summary);
-                }
-                return val || 0;
-            }
-            
-            if (lowerStat.includes('at bat') || lowerStat.includes('ab')) {
-                return parseFloat(log.atBats || log.AB || 0);
-            }
-            
-            const possibleKeys = [statType, statType.replace(/\s+/g, ''), statType.toLowerCase()];
-            for (let key of possibleKeys) {
-                if (log[key] !== undefined) return parseFloat(log[key]);
-            }
-            return 0;
-        }
-        function getGameLogStats(playerName, statType) {
-            if (!playerName || !statType || !gameLogs || gameLogs.length === 0) return null;
-            let matchingLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', playerName));
-            if (matchingLogs.length === 0) return null;
-            const recent = matchingLogs.slice(0, 20);
-            let sum = 0;
-            recent.forEach(log => {
-                sum += getStatValue(log, statType);
+            const columns = ['Slip Link', 'Players', 'Edge', 'Cash Likelihood', 'Payout'];
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                if (col === betSlipsSortColumn) th.classList.add(betSlipsSortDirection);
+                th.onclick = () => sortBetSlips(col);
+                header.appendChild(th);
             });
-            return sum / recent.length;
+            const combinations = generateCombinations(selectedBets);
+            let outputData = [];
+            for (let pickcount = 2; pickcount <= 6; pickcount++) {
+                outputData.push(...combinations[pickcount]);
+            }
+            if (selectedPayout !== 'all') {
+                outputData = outputData.filter(combo => combo.payout === selectedPayout);
+            }
+            outputData.sort((a, b) => {
+                let aVal = a[betSlipsSortColumn.toLowerCase().replace(' ', '')] || 0;
+                let bVal = b[betSlipsSortColumn.toLowerCase().replace(' ', '')] || 0;
+                if (['edge', 'cashlikelihood'].includes(betSlipsSortColumn.toLowerCase().replace(' ', ''))) {
+                    return betSlipsSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                }
+                return betSlipsSortDirection === 'asc' ? aVal.toString().localeCompare(bVal.toString()) : bVal.toString().localeCompare(aVal.toString());
+            });
+            outputData.forEach((combo, index) => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    const key = col.toLowerCase().replace(' ', '');
+                    if (col === 'Slip Link') {
+                        const a = document.createElement('a');
+                        a.href = combo.sliplink;
+                        a.textContent = 'Place Bet';
+                        a.target = '_blank';
+                        a.onclick = e => e.stopImmediatePropagation();
+                        td.appendChild(a);
+                    } else if (col === 'Players') {
+                        const expandIcon = document.createElement('span');
+                        expandIcon.style.marginRight = '8px';
+                        expandIcon.style.cursor = 'pointer';
+                        expandIcon.textContent = expandedCombinations.has(combo.players) ? '▴' : '▾';
+                        expandIcon.onclick = e => { e.stopImmediatePropagation(); toggleBetSlipDetail(index, combo.players); };
+                        td.appendChild(expandIcon);
+                        td.appendChild(document.createTextNode(combo.players));
+                    } else if (['edge', 'cashlikelihood'].includes(key)) {
+                        td.textContent = (combo[key] || 0).toFixed(2) + '%';
+                    } else {
+                        td.textContent = combo[key] || '-';
+                    }
+                    tr.appendChild(td);
+                });
+                body.appendChild(tr);
+                const detailRow = document.createElement('tr');
+                detailRow.classList.add('expanded-details');
+                detailRow.style.display = expandedCombinations.has(combo.players) ? '' : 'none';
+                const detailCell = document.createElement('td');
+                detailCell.colSpan = columns.length;
+                detailCell.innerHTML = combo.playerdetails.map(detail => `
+                    <div style="margin-bottom: 1rem; padding: 8px; background: #222; border-radius: 8px;">
+                        <strong>${detail.player}</strong><br>
+                        ${detail.choice} ${detail.line} ${detail.stat}
+                        <span style="color:#00ffcc;">(Edge: ${detail.edge.toFixed(1)}%)</span>
+                    </div>
+                `).join('');
+                detailRow.appendChild(detailCell);
+                body.appendChild(detailRow);
+            });
+        }
+
+        function toggleBetSlipDetail(index, playersKey) {
+            if (expandedCombinations.has(playersKey)) expandedCombinations.delete(playersKey);
+            else expandedCombinations.add(playersKey);
+            renderBetSlips();
+        }
+
+        function sortBetSlips(column) {
+            if (betSlipsSortColumn === column) {
+                betSlipsSortDirection = betSlipsSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                betSlipsSortColumn = column;
+                betSlipsSortDirection = 'desc';
+            }
+            renderBetSlips();
+        }
+
+        function updateBetSlip() {
+            renderBetSlips();
         }
 
         function renderContent() {
-            let filtered = allData.filter(row => (row['Stat Type'] || '').trim() !== '');
-            if (currentTab !== 'All') {
-                filtered = filtered.filter(row => (row['Stat Type'] || '').trim() === currentTab);
-            }
-            if (currentOddsType !== 'all') {
-                filtered = filtered.filter(row => row['Odds Type'] === currentOddsType);
-            }
-            if (searchTerm) {
-                filtered = filtered.filter(row =>
-                    row['Player Name'].toLowerCase().includes(searchTerm) ||
-                    (row['Stat Type'] || '').toLowerCase().includes(searchTerm)
-                );
-            }
-            // UPDATED WNBA-ONLY FANTASY SCORE FILTER (Hitter/Pitcher removed)
-            filtered = filtered.filter(row => {
-                const statType = (row['Stat Type'] || '').trim();
-                const isFantasyScore = statType === 'Fantasy Score';
-                if (isFantasyScore) {
-                    return selectedGames.has(row['Game Short Title']) && selectedTeams.has(row.Team);
-                } else {
-                    return selectedGames.has(row['Game Short Title']) && selectedTeams.has(row.Team) &&
-                           selectedCallouts.has(row['Callout Bet Tag'] || '');
-                }
-            });
+            contentDiv.innerHTML = '<div class="loading">Loading...</div>';
+            setTimeout(() => {
+                let filtered = allData.filter(row => (row['Stat Type'] || '').trim() !== '');
 
-            // FIXED BET TAG FILTER - INCLUDES EMPTY BET TAGS (Fantasy Score, combos, etc.)
-            if (selectedBetTags.size > 0) {
+                if (currentTab !== 'All') {
+                    filtered = filtered.filter(row => (row['Stat Type'] || '').trim() === currentTab);
+                }
+                if (currentOddsType !== 'all') {
+                    filtered = filtered.filter(row => row['Odds Type'] === currentOddsType);
+                }
+                if (searchTerm) {
+                    filtered = filtered.filter(row =>
+                        row['Player Name'].toLowerCase().includes(searchTerm) ||
+                        (row['Stat Type'] || '').toLowerCase().includes(searchTerm)
+                    );
+                }
+
                 filtered = filtered.filter(row => {
+                    const statType = (row['Stat Type'] || '').trim().toLowerCase();
+                    const isFantasyScore = statType.includes('fantasy score');
+
+                    const gameOk = selectedGames.has(row['Game Short Title']);
+                    const teamOk = selectedTeams.has(row.Team || '');
+
+                    if (!gameOk || !teamOk) return false;
+
+                    if (isFantasyScore) return true;
+
+                    const calloutOk = selectedCallouts.has((row['Callout Bet Tag'] || '').trim());
                     const betTag = (row['Bet Tag'] || '').trim();
-                    return betTag === '' || selectedBetTags.has(betTag);
-                });
-            }
+                    const betTagOk = selectedBetTags.size === 0 || betTag === '' || selectedBetTags.has(betTag);
 
-            if (selectedFav.size > 0) {
-                filtered = filtered.filter(row => selectedFav.has(row['Fav'] || 'No'));
-            }
-            // UPDATED WNBA GAME SCORING THRESHOLDS (average total ~201 points)
-            if (selectedGameTypes.size > 0) {
-                filtered = filtered.filter(row => {
-                    const ou = parseFloat(row['O/U'] || 0);
-                    let type = 'Normal';
-                    if (ou >= 208.5) type = 'High';
-                    else if (ou <= 193.5) type = 'Low';
-                    return selectedGameTypes.has(type);
+                    return calloutOk && betTagOk;
                 });
-            }
-            filtered = filtered.filter(row => parseFloat(row['Edge %'] || 0) < 100);
-            if (showSelectedOnly) {
-                const selectedKeys = new Set(selectedBets.map(b => b.key));
-                filtered = filtered.filter(row => selectedKeys.has(`${row['Player Name']}-${row['Stat Type']}`));
-            }
-            filtered.sort((a, b) => {
-                let aVal = 0, bVal = 0;
-                if (contentSortColumn === 'Edge') {
-                    aVal = parseFloat(a['Edge %']) || 0;
-                    bVal = parseFloat(b['Edge %']) || 0;
-                } else if (contentSortColumn === 'PP-UD') {
-                    const getPPUD = (row) => {
-                        const udStr = row['Underdog Line'] || '';
-                        const ud = parseFloat(udStr);
-                        if (!udStr || isNaN(ud) || ud === 0) return null;
-                        const pp = parseFloat(row['Line Score']) || 0;
-                        return pp - ud;
-                    };
-                    const aPPUD = getPPUD(a);
-                    const bPPUD = getPPUD(b);
-                    if (aPPUD === null && bPPUD === null) return 0;
-                    if (aPPUD === null) return 1;
-                    if (bPPUD === null) return -1;
-                    if (contentSortDirection === 'asc') return aPPUD - bPPUD;
-                    return bPPUD - aPPUD;
-                } else if (contentSortColumn === 'Line') {
-                    aVal = parseFloat(a['Line Score']) || 0;
-                    bVal = parseFloat(b['Line Score']) || 0;
-                } else if (contentSortColumn === 'Avg Proj') {
-                    aVal = parseFloat(a['Average Projected'] || a['Proj'] || 0) || 0;
-                    bVal = parseFloat(b['Average Projected'] || b['Proj'] || 0) || 0;
-                } else if (contentSortColumn === 'DVP Adj') {
-                    aVal = parseFloat(a['DVP Adjusted'] || a['DVP'] || 0) || 0;
-                    bVal = parseFloat(b['DVP Adjusted'] || b['DVP'] || 0) || 0;
-                } else if (contentSortColumn === 'Total Proj') {
-                    aVal = parseFloat(a['Total Projection'] || a['Total'] || 0) || 0;
-                    bVal = parseFloat(b['Total Projection'] || b['Total'] || 0) || 0;
-                } else if (contentSortColumn === 'Opp') {
-                    aVal = parseFloat(a['Opportunities'] || 0) || 0;
-                    bVal = parseFloat(b['Opportunities'] || 0) || 0;
+
+                if (selectedFav.size > 0) {
+                    filtered = filtered.filter(row => selectedFav.has(row['Fav'] || 'No'));
                 }
-                if (contentSortDirection === 'asc') return aVal - bVal;
-                return bVal - aVal;
-            });
-            currentFiltered = filtered;
-            contentDiv.innerHTML = '';
-            contentDiv.classList.remove('table-view');
-            if (currentView === 'table') contentDiv.classList.add('table-view');
-            if (filtered.length === 0) {
-                contentDiv.innerHTML = '<div class="loading">No data available for this selection. Try switching the odds type...</div>';
-                return;
-            }
-            if (currentView === 'cards') {
-                filtered.forEach((row, index) => {
-                    row.id = index + 1;
-                    const card = document.createElement('div');
-                    card.classList.add('card');
-                    const edge = isNaN(parseFloat(row['Edge %'])) ? 'N/A' : parseFloat(row['Edge %']).toFixed(1) + '%';
-                    let icon = '';
-                    if (row['Odds Type'] === 'demon') icon = '<div class="icon">👿</div>';
-                    if (row['Odds Type'] === 'goblin') icon = '<div class="icon">👺</div>';
-                    let gameTime = row['Game Short Title'] + ' ' + (row['Match Progress'] || '');
-                    if (row.Opp && row.Opp !== 'Multiple') gameTime = '@ ' + row.Opp + ' ' + (row['Match Progress'] || '');
-                    let lessClass = 'button less';
-                    let moreClass = 'button more';
-                    const key = `${row['Player Name']}-${row['Stat Type']}`;
-                    const selectedBet = selectedBets.find(b => b.key === key);
-                    const betTagLower = (row['Bet Tag'] || '').toLowerCase();
-                    const dividerClass = betTagLower.includes('more') || betTagLower.includes('over') ? 'more' : (betTagLower.includes('less') || betTagLower.includes('under') ? 'less' : '');
-                    if (selectedBet) {
-                        if (selectedBet.choice === 'Less') lessClass += ' selected selected-less';
-                        else if (selectedBet.choice === 'More') moreClass += ' selected selected-more';
-                    }
-                    card.innerHTML = `
-                        ${icon}
-                        <div class="header">
-                            <span class="pop">${edge}</span>
-                        </div>
-                        <img class="headshot" src="${row['Headshot URL'] || row['Player Image'] || 'placeholder.png'}" alt="${row['Player Name']}">
-                        <div class="team">${row.Team || ''}</div>
-                        <div class="name">${row['Player Name']}</div>
-                        <div class="game">${gameTime}</div>
-                        <div class="stat">${row['Line Score']} ${row['Stat Type']}</div>
-                        <div class="buttons">
+                if (selectedGameTypes.size > 0) {
+                    filtered = filtered.filter(row => {
+                        const ou = parseFloat(row['O/U'] || 0);
+                        const type = getGameType(ou);
+                        return selectedGameTypes.has(type);
+                    });
+                }
+                if (selectedHotCold.size > 0 && !selectedHotCold.has('Neutral')) {
+                    filtered = filtered.filter(row => {
+                        const status = getHotColdStatus(row['Player Name']);
+                        return selectedHotCold.has(status);
+                    });
+                }
+                filtered = filtered.filter(row => parseFloat(row['Edge %'] || 0) < 100);
+
+                if (showSelectedOnly) {
+                    const selectedKeys = new Set(selectedBets.map(b => b.key));
+                    filtered = filtered.filter(row => selectedKeys.has(`${row['Player Name']}-${row['Stat Type']}`));
+                }
+
+                filtered.sort((a, b) => {
+                    let aVal = parseFloat(a['Edge %']) || 0;
+                    let bVal = parseFloat(b['Edge %']) || 0;
+                    if (contentSortColumn === 'Edge') return contentSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                    return 0;
+                });
+
+                currentFiltered = filtered;
+                contentDiv.innerHTML = '';
+                contentDiv.classList.remove('table-view');
+                if (currentView === 'table') contentDiv.classList.add('table-view');
+
+                if (filtered.length === 0) {
+                    contentDiv.innerHTML = '<div class="loading">No data available for this selection. Try switching the odds type...</div>';
+                    return;
+                }
+
+                if (currentView === 'cards') {
+                    filtered.forEach((row, index) => {
+                        row.id = index + 1;
+                        const card = document.createElement('div');
+                        card.classList.add('card');
+                        const edge = isNaN(parseFloat(row['Edge %'])) ? 'N/A' : parseFloat(row['Edge %']).toFixed(1) + '%';
+                        let icon = '';
+                        if (row['Odds Type'] === 'demon') icon = '<div class="icon">👿</div>';
+                        if (row['Odds Type'] === 'goblin') icon = '<div class="icon">👺</div>';
+                        let gameTime = row['Game Short Title'] + ' ' + (row['Match Progress'] || '');
+                        if (row.Opp && row.Opp !== 'Multiple') gameTime = '@ ' + row.Opp + ' ' + (row['Match Progress'] || '');
+                        let lessClass = 'button less';
+                        let moreClass = 'button more';
+                        const key = `${row['Player Name']}-${row['Stat Type']}`;
+                        const selectedBet = selectedBets.find(b => b.key === key);
+                        const betTagLower = (row['Bet Tag'] || '').toLowerCase();
+                        const dividerClass = betTagLower.includes('more') || betTagLower.includes('over') ? 'more' : (betTagLower.includes('less') || betTagLower.includes('under') ? 'less' : '');
+                        if (selectedBet) {
+                            if (selectedBet.choice === 'Less') lessClass += ' selected selected-less';
+                            else if (selectedBet.choice === 'More') moreClass += ' selected selected-more';
+                        }
+                        card.innerHTML = `
+                            ${icon}
+                            <div class="header">
+                                <span class="pop">${edge}</span>
+                            </div>
+                            <img class="headshot" src="${row['Headshot URL'] || row['Player Image'] || 'placeholder.png'}" alt="${row['Player Name']}">
+                            <div class="team">${row.Team || ''}</div>
+                            <div class="name">${row['Player Name']}</div>
+                            <div class="game">${gameTime}</div>
+                            <div class="stat">${row['Line Score']} ${row['Stat Type']}</div>
+                            <div class="buttons">
+                                <button class="${lessClass}" data-choice="Less">↓ Less</button>
+                                <div class="divider ${dividerClass}"></div>
+                                <button class="${moreClass}" data-choice="More">↑ More</button>
+                            </div>
+                            <div class="info-icon" title="Player Info" data-index="${index}">ℹ️</div>
+                        `;
+                        contentDiv.appendChild(card);
+                        const buttons = card.querySelectorAll('.button');
+                        buttons.forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const choice = btn.dataset.choice;
+                                const key = `${row['Player Name']}-${row['Stat Type']}`;
+                                const existingIndex = selectedBets.findIndex(b => b.key === key);
+                                const prob = parseFloat(row['Edge %'] || 50) / 100;
+                                const betData = {
+                                    key,
+                                    player: row['Player Name'],
+                                    choice,
+                                    line: row['Line Score'],
+                                    stat: row['Stat Type'],
+                                    edge: parseFloat(row['Edge %']) || 0,
+                                    prob,
+                                    game: row['Game Short Title'],
+                                    team: row.Team,
+                                    id: row.id,
+                                    projectionId: row['Data ID'] || ''
+                                };
+                                if (existingIndex > -1 && selectedBets[existingIndex].choice === choice) {
+                                    selectedBets.splice(existingIndex, 1);
+                                    btn.classList.remove('selected', 'selected-more', 'selected-less');
+                                } else {
+                                    if (existingIndex > -1) selectedBets[existingIndex] = betData;
+                                    else selectedBets.push(betData);
+                                    card.querySelectorAll('.button').forEach(b => b.classList.remove('selected', 'selected-more', 'selected-less', 'green-outline', 'red-outline'));
+                                    btn.classList.add('selected');
+                                    if (choice === 'More') btn.classList.add('selected-more');
+                                    else btn.classList.add('selected-less');
+                                }
+                                updateBetSlip();
+                            });
+                        });
+                        card.querySelector('.info-icon').addEventListener('click', () => showPlayerPopup(row, parseInt(card.querySelector('.info-icon').dataset.index)));
+                    });
+                } else {
+                    const table = document.createElement('table');
+                    const thead = document.createElement('thead');
+                    const headerTr = document.createElement('tr');
+                    const headers = [
+                        {text: 'Details', sortable: false},
+                        {text: 'Stat', sortable: false},
+                        {text: 'Edge', sortable: true, col: 'Edge'},
+                        {text: 'Line', sortable: true, col: 'Line'},
+                        {text: 'PP-UD', sortable: true, col: 'PP-UD'},
+                        {text: 'Avg Proj', sortable: true, col: 'Avg Proj'},
+                        {text: 'DVP Adj', sortable: true, col: 'DVP Adj'},
+                        {text: 'Total Proj', sortable: true, col: 'Total Proj'},
+                        {text: 'L5 Avg', sortable: false},
+                        {text: 'L5 Hit%', sortable: false},
+                        {text: 'Actions', sortable: false}
+                    ];
+                    headers.forEach(h => {
+                        const th = document.createElement('th');
+                        th.textContent = h.text;
+                        if (h.sortable) {
+                            th.dataset.column = h.col;
+                            th.onclick = () => sortContentTable(h.col);
+                            if (h.col === contentSortColumn) th.classList.add(contentSortDirection);
+                        }
+                        headerTr.appendChild(th);
+                    });
+                    thead.appendChild(headerTr);
+                    table.appendChild(thead);
+                    const tbody = document.createElement('tbody');
+                    filtered.forEach((row, index) => {
+                        row.id = index + 1;
+                        const tr = document.createElement('tr');
+                        tr.style.cursor = 'pointer';
+                        tr.onclick = () => showPlayerPopup(row, index);
+                        const detailsTd = document.createElement('td');
+                        const img = document.createElement('img');
+                        img.src = row['Headshot URL'] || row['Player Image'] || 'placeholder.png';
+                        img.alt = row['Player Name'];
+                        img.style.width = '32px';
+                        img.style.height = '32px';
+                        img.style.borderRadius = '50%';
+                        img.style.marginRight = '8px';
+                        img.style.verticalAlign = 'middle';
+                        const playerNameSpan = document.createElement('span');
+                        playerNameSpan.style.fontWeight = 'bold';
+                        playerNameSpan.style.color = '#00ffcc';
+                        playerNameSpan.textContent = row['Player Name'];
+                        const infoIcon = document.createElement('span');
+                        infoIcon.classList.add('info-icon');
+                        infoIcon.textContent = 'ℹ️';
+                        infoIcon.dataset.index = index;
+                        infoIcon.style.marginLeft = '8px';
+                        infoIcon.addEventListener('click', (e) => { e.stopPropagation(); showPlayerPopup(row, index); });
+                        let gameTime = `${row.Team || ''} @ ${row.Opp || row['Opponent'] || ''} ${row['Scheduled At'] ? new Date(row['Scheduled At']).toLocaleString('en-US', {hour:'numeric', minute:'2-digit'}) : ''}`;
+                        const calloutTag = row['Callout Bet Tag'] ? ` | ${row['Callout Bet Tag']}` : '';
+                        detailsTd.style.display = 'flex';
+                        detailsTd.style.alignItems = 'center';
+                        detailsTd.appendChild(img);
+                        detailsTd.appendChild(playerNameSpan);
+                        detailsTd.appendChild(infoIcon);
+                        detailsTd.appendChild(document.createTextNode(` ${gameTime}${calloutTag}`));
+                        tr.appendChild(detailsTd);
+                        const statTd = document.createElement('td');
+                        statTd.textContent = row['Stat Type'];
+                        tr.appendChild(statTd);
+                        const edgeTd = document.createElement('td');
+                        let icon = '';
+                        if (row['Odds Type'] === 'demon') icon = '👿 ';
+                        if (row['Odds Type'] === 'goblin') icon = '👺 ';
+                        const edge = isNaN(parseFloat(row['Edge %'])) ? 'N/A' : parseFloat(row['Edge %']).toFixed(1) + '%';
+                        edgeTd.textContent = icon + edge;
+                        tr.appendChild(edgeTd);
+                        const lineTd = document.createElement('td');
+                        lineTd.textContent = row['Line Score'];
+                        tr.appendChild(lineTd);
+                        const ppUdTd = document.createElement('td');
+                        const udLineStr = row['Underdog Line'] || '';
+                        const udLine = parseFloat(udLineStr);
+                        const ppLine = parseFloat(row['Line Score']);
+                        ppUdTd.textContent = (udLineStr && udLine !== 0 && !isNaN(udLine)) ? (ppLine - udLine).toFixed(1) : '';
+                        tr.appendChild(ppUdTd);
+                        const avgProjTd = document.createElement('td');
+                        avgProjTd.textContent = parseFloat(row['Average Projected'] || row['Proj'] || 0).toFixed(1) || '-';
+                        tr.appendChild(avgProjTd);
+                        const dvpAdjTd = document.createElement('td');
+                        dvpAdjTd.textContent = parseFloat(row['DVP Adjusted'] || row['DVP'] || 0).toFixed(1) || '-';
+                        tr.appendChild(dvpAdjTd);
+                        const totalProjTd = document.createElement('td');
+                        totalProjTd.textContent = parseFloat(row['Total Projection'] || row['Total'] || 0).toFixed(1) || '-';
+                        tr.appendChild(totalProjTd);
+                        const recentLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', row['Player Name']));
+                        const l5Logs = recentLogs.slice(0, 5);
+                        let l5Avg = '-';
+                        let l5HitPct = '-';
+                        if (l5Logs.length > 0) {
+                            let sum = 0;
+                            let hits = 0;
+                            const lineScore = parseFloat(row['Line Score']) || 0;
+                            const isHitter = !(row.Position || row.Pos || '').toUpperCase().includes('P') && !row['Stat Type'].toLowerCase().includes('pitcher');
+                            l5Logs.forEach(log => {
+                                const value = getStatValue(log, row['Stat Type']);
+                                sum += value;
+                                if (value > lineScore) hits++;
+                            });
+                            l5Avg = (sum / l5Logs.length).toFixed(1);
+                            l5HitPct = ((hits / l5Logs.length) * 100).toFixed(0) + '%';
+                        }
+                        const l5AvgTd = document.createElement('td');
+                        l5AvgTd.textContent = l5Avg;
+                        tr.appendChild(l5AvgTd);
+                        const l5HitTd = document.createElement('td');
+                        l5HitTd.textContent = l5HitPct;
+                        tr.appendChild(l5HitTd);
+                        const actionsTd = document.createElement('td');
+                        const buttonsDiv = document.createElement('div');
+                        buttonsDiv.classList.add('buttons');
+                        let lessClass = 'button less';
+                        let moreClass = 'button more';
+                        const key = `${row['Player Name']}-${row['Stat Type']}`;
+                        const selectedBet = selectedBets.find(b => b.key === key);
+                        const betTagLower = (row['Bet Tag'] || '').toLowerCase();
+                        const dividerClass = betTagLower.includes('more') || betTagLower.includes('over') ? 'more' : (betTagLower.includes('less') || betTagLower.includes('under') ? 'less' : '');
+                        if (selectedBet) {
+                            if (selectedBet.choice === 'Less') lessClass += ' selected selected-less';
+                            else if (selectedBet.choice === 'More') moreClass += ' selected selected-more';
+                        }
+                        buttonsDiv.innerHTML = `
                             <button class="${lessClass}" data-choice="Less">↓ Less</button>
                             <div class="divider ${dividerClass}"></div>
                             <button class="${moreClass}" data-choice="More">↑ More</button>
-                        </div>
-                        <div class="info-icon" title="Player Info" data-index="${index}">ℹ️</div>
-                    `;
-                    contentDiv.appendChild(card);
-                    const buttons = card.querySelectorAll('.button');
-                    buttons.forEach(btn => {
-                        btn.addEventListener('click', () => {
-                            const choice = btn.dataset.choice;
-                            const key = `${row['Player Name']}-${row['Stat Type']}`;
-                            const existingIndex = selectedBets.findIndex(b => b.key === key);
-                            const prob = parseFloat(row['Edge %'] || 50) / 100;
-                            const betData = {
-                                key,
-                                player: row['Player Name'],
-                                choice,
-                                line: row['Line Score'],
-                                stat: row['Stat Type'],
-                                edge: parseFloat(row['Edge %']) || 0,
-                                prob,
-                                game: row['Game Short Title'],
-                                team: row.Team,
-                                id: row.id,
-                                projectionId: row['Data ID'] || ''
-                            };
-                            if (existingIndex > -1 && selectedBets[existingIndex].choice === choice) {
-                                selectedBets.splice(existingIndex, 1);
-                                btn.classList.remove('selected', 'selected-more', 'selected-less');
-                            } else {
-                                if (existingIndex > -1) selectedBets[existingIndex] = betData;
-                                else selectedBets.push(betData);
-                                card.querySelectorAll('.button').forEach(b => b.classList.remove('selected', 'selected-more', 'selected-less', 'green-outline', 'red-outline'));
-                                btn.classList.add('selected');
-                                if (choice === 'More') btn.classList.add('selected-more');
-                                else btn.classList.add('selected-less');
-                            }
-                            updateBetSlip();
+                        `;
+                        actionsTd.appendChild(buttonsDiv);
+                        tr.appendChild(actionsTd);
+                        const buttons = buttonsDiv.querySelectorAll('.button');
+                        buttons.forEach(btn => {
+                            btn.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                const choice = btn.dataset.choice;
+                                const key = `${row['Player Name']}-${row['Stat Type']}`;
+                                const existingIndex = selectedBets.findIndex(b => b.key === key);
+                                const prob = parseFloat(row['Edge %'] || 50) / 100;
+                                const betData = {
+                                    key,
+                                    player: row['Player Name'],
+                                    choice,
+                                    line: row['Line Score'],
+                                    stat: row['Stat Type'],
+                                    edge: parseFloat(row['Edge %']) || 0,
+                                    prob,
+                                    game: row['Game Short Title'],
+                                    team: row.Team,
+                                    id: row.id,
+                                    projectionId: row['Data ID'] || ''
+                                };
+                                if (existingIndex > -1 && selectedBets[existingIndex].choice === choice) {
+                                    selectedBets.splice(existingIndex, 1);
+                                } else {
+                                    if (existingIndex > -1) selectedBets[existingIndex] = betData;
+                                    else selectedBets.push(betData);
+                                    buttonsDiv.querySelectorAll('.button').forEach(b => b.classList.remove('selected', 'selected-more', 'selected-less', 'green-outline', 'red-outline'));
+                                    btn.classList.add('selected');
+                                    if (choice === 'More') btn.classList.add('selected-more');
+                                    else btn.classList.add('selected-less');
+                                }
+                                updateBetSlip();
+                                renderContent();
+                            });
                         });
+                        tbody.appendChild(tr);
                     });
-                    card.querySelector('.info-icon').addEventListener('click', () => showPlayerPopup(row, parseInt(card.querySelector('.info-icon').dataset.index)));
-                });
-            } else {
-                const table = document.createElement('table');
-                const thead = document.createElement('thead');
-                const headerTr = document.createElement('tr');
-                const headers = [
-                    {text: 'Details', sortable: false},
-                    {text: 'Stat', sortable: false},
-                    {text: 'Edge', sortable: true, col: 'Edge'},
-                    {text: 'Line', sortable: true, col: 'Line'},
-                    {text: 'PP-UD', sortable: true, col: 'PP-UD'},
-                    {text: 'Avg Proj', sortable: true, col: 'Avg Proj'},
-                    {text: 'DVP Adj', sortable: true, col: 'DVP Adj'},
-                    {text: 'Total Proj', sortable: true, col: 'Total Proj'},
-                    {text: 'L5 Avg', sortable: false},
-                    {text: 'L5 Hit%', sortable: false},
-                    {text: 'Actions', sortable: false}
-                ];
-                headers.forEach(h => {
-                    const th = document.createElement('th');
-                    th.textContent = h.text;
-                    if (h.sortable) {
-                        th.dataset.column = h.col;
-                        th.onclick = () => sortContentTable(h.col);
-                        if (h.col === contentSortColumn) th.classList.add(contentSortDirection);
-                    }
-                    headerTr.appendChild(th);
-                });
-                thead.appendChild(headerTr);
-                table.appendChild(thead);
-                const tbody = document.createElement('tbody');
-                filtered.forEach((row, index) => {
-                    row.id = index + 1;
-                    const tr = document.createElement('tr');
-                    tr.style.cursor = 'pointer';
-                    tr.onclick = () => showPlayerPopup(row, index);
-                    const detailsTd = document.createElement('td');
-                    const img = document.createElement('img');
-                    img.src = row['Headshot URL'] || row['Player Image'] || 'placeholder.png';
-                    img.alt = row['Player Name'];
-                    img.style.width = '32px';
-                    img.style.height = '32px';
-                    img.style.borderRadius = '50%';
-                    img.style.marginRight = '8px';
-                    img.style.verticalAlign = 'middle';
-                    const playerNameSpan = document.createElement('span');
-                    playerNameSpan.style.fontWeight = 'bold';
-                    playerNameSpan.style.color = '#00ffcc';
-                    playerNameSpan.textContent = row['Player Name'];
-                    const infoIcon = document.createElement('span');
-                    infoIcon.classList.add('info-icon');
-                    infoIcon.textContent = 'ℹ️';
-                    infoIcon.dataset.index = index;
-                    infoIcon.style.marginLeft = '8px';
-                    infoIcon.addEventListener('click', (e) => { e.stopPropagation(); showPlayerPopup(row, index); });
-                    let gameTime = `${row.Team || ''} @ ${row.Opp || row['Opponent'] || ''} ${row['Scheduled At'] ? new Date(row['Scheduled At']).toLocaleString('en-US', {hour:'numeric', minute:'2-digit'}) : ''}`;
-                    const calloutTag = row['Callout Bet Tag'] ? ` | ${row['Callout Bet Tag']}` : '';
-                    detailsTd.style.display = 'flex';
-                    detailsTd.style.alignItems = 'center';
-                    detailsTd.appendChild(img);
-                    detailsTd.appendChild(playerNameSpan);
-                    detailsTd.appendChild(infoIcon);
-                    detailsTd.appendChild(document.createTextNode(` ${gameTime}${calloutTag}`));
-                    tr.appendChild(detailsTd);
-                    const statTd = document.createElement('td');
-                    statTd.textContent = row['Stat Type'];
-                    tr.appendChild(statTd);
-                    const edgeTd = document.createElement('td');
-                    let icon = '';
-                    if (row['Odds Type'] === 'demon') icon = '👿 ';
-                    if (row['Odds Type'] === 'goblin') icon = '👺 ';
-                    const edge = isNaN(parseFloat(row['Edge %'])) ? 'N/A' : parseFloat(row['Edge %']).toFixed(1) + '%';
-                    edgeTd.textContent = icon + edge;
-                    tr.appendChild(edgeTd);
-                    const lineTd = document.createElement('td');
-                    lineTd.textContent = row['Line Score'];
-                    tr.appendChild(lineTd);
-                    const ppUdTd = document.createElement('td');
-                    const udLineStr = row['Underdog Line'] || '';
-                    const udLine = parseFloat(udLineStr);
-                    const ppLine = parseFloat(row['Line Score']);
-                    ppUdTd.textContent = (udLineStr && udLine !== 0 && !isNaN(udLine)) ? (ppLine - udLine).toFixed(1) : '';
-                    tr.appendChild(ppUdTd);
-                    const avgProjTd = document.createElement('td');
-                    avgProjTd.textContent = parseFloat(row['Average Projected'] || row['Proj'] || 0).toFixed(1) || '-';
-                    tr.appendChild(avgProjTd);
-                    const dvpAdjTd = document.createElement('td');
-                    dvpAdjTd.textContent = parseFloat(row['DVP Adjusted'] || row['DVP'] || 0).toFixed(1) || '-';
-                    tr.appendChild(dvpAdjTd);
-                    const totalProjTd = document.createElement('td');
-                    totalProjTd.textContent = parseFloat(row['Total Projection'] || row['Total'] || 0).toFixed(1) || '-';
-                    tr.appendChild(totalProjTd);
-                    const recentLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', row['Player Name']));
-                    const l5Logs = recentLogs.slice(0, 5);
-                    let l5Avg = '-';
-                    let l5HitPct = '-';
-                    if (l5Logs.length > 0) {
-                        let sum = 0;
-                        let hits = 0;
-                        const lineScore = parseFloat(row['Line Score']) || 0;
-                        const isHitter = !(row.Position || row.Pos || '').toUpperCase().includes('P') && !row['Stat Type'].toLowerCase().includes('pitcher');
-                        l5Logs.forEach(log => {
-                            const value = getStatValue(log, row['Stat Type']);
-                            sum += value;
-                            if (value > lineScore) hits++;
-                        });
-                        l5Avg = (sum / l5Logs.length).toFixed(1);
-                        l5HitPct = ((hits / l5Logs.length) * 100).toFixed(0) + '%';
-                    }
-                    const l5AvgTd = document.createElement('td');
-                    l5AvgTd.textContent = l5Avg;
-                    tr.appendChild(l5AvgTd);
-                    const l5HitTd = document.createElement('td');
-                    l5HitTd.textContent = l5HitPct;
-                    tr.appendChild(l5HitTd);
-                    const actionsTd = document.createElement('td');
-                    const buttonsDiv = document.createElement('div');
-                    buttonsDiv.classList.add('buttons');
-                    let lessClass = 'button less';
-                    let moreClass = 'button more';
-                    const key = `${row['Player Name']}-${row['Stat Type']}`;
-                    const selectedBet = selectedBets.find(b => b.key === key);
-                    const betTagLower = (row['Bet Tag'] || '').toLowerCase();
-                    const dividerClass = betTagLower.includes('more') || betTagLower.includes('over') ? 'more' : (betTagLower.includes('less') || betTagLower.includes('under') ? 'less' : '');
-                    if (selectedBet) {
-                        if (selectedBet.choice === 'Less') lessClass += ' selected selected-less';
-                        else if (selectedBet.choice === 'More') moreClass += ' selected selected-more';
-                    }
-                    buttonsDiv.innerHTML = `
-                        <button class="${lessClass}" data-choice="Less">↓ Less</button>
-                        <div class="divider ${dividerClass}"></div>
-                        <button class="${moreClass}" data-choice="More">↑ More</button>
-                    `;
-                    actionsTd.appendChild(buttonsDiv);
-                    tr.appendChild(actionsTd);
-                    const buttons = buttonsDiv.querySelectorAll('.button');
-                    buttons.forEach(btn => {
-                        btn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            const choice = btn.dataset.choice;
-                            const key = `${row['Player Name']}-${row['Stat Type']}`;
-                            const existingIndex = selectedBets.findIndex(b => b.key === key);
-                            const prob = parseFloat(row['Edge %'] || 50) / 100;
-                            const betData = {
-                                key,
-                                player: row['Player Name'],
-                                choice,
-                                line: row['Line Score'],
-                                stat: row['Stat Type'],
-                                edge: parseFloat(row['Edge %']) || 0,
-                                prob,
-                                game: row['Game Short Title'],
-                                team: row.Team,
-                                id: row.id,
-                                projectionId: row['Data ID'] || ''
-                            };
-                            if (existingIndex > -1 && selectedBets[existingIndex].choice === choice) {
-                                selectedBets.splice(existingIndex, 1);
-                            } else {
-                                if (existingIndex > -1) selectedBets[existingIndex] = betData;
-                                else selectedBets.push(betData);
-                                buttonsDiv.querySelectorAll('.button').forEach(b => b.classList.remove('selected', 'selected-more', 'selected-less', 'green-outline', 'red-outline'));
-                                btn.classList.add('selected');
-                                if (choice === 'More') btn.classList.add('selected-more');
-                                else btn.classList.add('selected-less');
-                            }
-                            updateBetSlip();
-                            renderContent();
-                        });
-                    });
-                    tbody.appendChild(tr);
-                });
-                table.appendChild(tbody);
-                const tableWrapper = document.createElement('div');
-                tableWrapper.classList.add('table-wrapper');
-                tableWrapper.appendChild(table);
-                contentDiv.appendChild(tableWrapper);
-            }
+                    table.appendChild(tbody);
+                    const tableWrapper = document.createElement('div');
+                    tableWrapper.classList.add('table-wrapper');
+                    tableWrapper.appendChild(table);
+                    contentDiv.appendChild(tableWrapper);
+                }
+            }, 100);
         }
 
         function showPlayerPopup(row, currentIndex) {
@@ -1361,25 +1539,20 @@
             document.getElementById('popupTeamPos').textContent = `${row.Team || ''} | ${row.Position || ''}`;
             document.getElementById('popupGame').textContent = `${row.Team || ''} @ ${row.Opp || row['Opponent'] || ''}`;
             document.getElementById('popupScheduledAt').textContent = row['Scheduled At'] ? new Date(row['Scheduled At']).toLocaleString() : '';
-         
             const ou = parseFloat(row['O/U'] || 0);
-            let ouColor = ou >= 208.5 ? 'ou-green' : ou <= 193.5 ? 'ou-red' : 'ou-yellow';
-            let ouText = ou >= 208.5 ? 'High' : ou <= 193.5 ? 'Low' : 'Normal';
-         
+            let ouColor = ou >= 9.6 ? 'ou-green' : ou <= 8.4 ? 'ou-red' : 'ou-yellow';
+            let ouText = ou >= 9.6 ? 'High' : ou <= 8.4 ? 'Low' : 'Normal';
             const spread = parseFloat(row.Spread || 0);
             let spreadColor = '';
             if (spread < 0) spreadColor = 'spread-green';
             else if (Math.abs(spread) <= 0.9) spreadColor = 'spread-yellow';
             else spreadColor = 'spread-red';
-         
             const dvpRank = parseFloat(row['DVP Rank'] || 999);
             let dvpColor = dvpRank <= 9 ? 'dvp-green' : dvpRank <= 19 ? 'dvp-yellow' : 'dvp-red';
-         
             document.getElementById('popupSpreadOU').innerHTML = `
                 <span class="${spreadColor}">Spread: ${spread}</span>
                 <span class="${ouColor}">O/U: ${ou} (${ouText})</span>
             `;
-         
             const statsBoxes = document.getElementById('statsBoxes');
             statsBoxes.innerHTML = '';
             const stats = [
@@ -1395,7 +1568,6 @@
                 `;
                 statsBoxes.appendChild(box);
             });
-         
             const popupTabs = document.getElementById('popupTabs');
             popupTabs.innerHTML = '';
             const tabNames = ['Overview', 'Game Log', 'Splits', 'News', 'Other Bets', 'Matchup'];
@@ -1433,7 +1605,6 @@
             content.innerHTML = '';
             const playerName = row['Player Name'];
             const isHitter = !(row.Position || row.Pos || '').toUpperCase().includes('P') && !row['Stat Type'].toLowerCase().includes('pitcher');
-         
             if (tab === 'Overview') {
                 const recentAvg = getGameLogStats(row['Player Name'], row['Stat Type']);
                 const recentText = recentAvg !== null ? `Recent Avg from Game Logs: ${parseFloat(recentAvg).toFixed(2)}` : 'Recent Avg from Game Logs: N/A';
@@ -1443,7 +1614,6 @@
                 canvas.id = 'projectionChart';
                 chartContainer.appendChild(canvas);
                 content.appendChild(chartContainer);
-             
                 const avgProjected = parseFloat(row['Average Projected'] || row['Proj'] || 0);
                 const dvpAdjusted = parseFloat(row['DVP Adjusted'] || row['DVP'] || 0);
                 const totalProjection = parseFloat(row['Total Projection'] || row['Total'] || 0);
@@ -1514,7 +1684,6 @@
                     },
                     plugins: [ChartDataLabels]
                 });
-             
                 const recentDiv = document.createElement('div');
                 recentDiv.style.marginTop = '20px';
                 recentDiv.style.padding = '12px';
@@ -1525,7 +1694,6 @@
                 recentDiv.style.color = '#00ffcc';
                 recentDiv.textContent = recentText;
                 content.appendChild(recentDiv);
-             
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.classList.add('popup-buttons');
                 const betTagLower = (row['Bet Tag'] || '').toLowerCase();
@@ -1544,7 +1712,6 @@
                     <button id="popupMore" class="${moreClass}" data-choice="More">↑ More</button>
                 `;
                 content.appendChild(buttonsDiv);
-             
                 setTimeout(() => {
                     const lessBtn = document.getElementById('popupLess');
                     const moreBtn = document.getElementById('popupMore');
@@ -1836,20 +2003,12 @@
             }
         }
 
-        function updateBetSlip() {
-            console.log('Bet slip updated - selected bets:', selectedBets.length);
-        }
-
-        function filterBetSlips() {
-            console.log('Filtering bet slips...');
-        }
-
-        function sortContentTable(col) {
-            if (contentSortColumn === col) {
+        function sortContentTable(column) {
+            if (contentSortColumn === column) {
                 contentSortDirection = contentSortDirection === 'asc' ? 'desc' : 'asc';
             } else {
-                contentSortColumn = col;
-                contentSortDirection = 'desc';
+                contentSortColumn = column;
+                contentSortDirection = 'asc';
             }
             renderContent();
         }
