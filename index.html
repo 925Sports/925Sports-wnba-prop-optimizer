@@ -477,10 +477,6 @@
         <button id="selectAllGameTypes" class="select-btn">Select All</button>
         <button id="deselectAllGameTypes" class="select-btn">Deselect All</button>
         <div id="gameTypesList"></div>
-        <h3>Hot / Cold Batter</h3>
-        <button id="selectAllHotCold" class="select-btn">Select All</button>
-        <button id="deselectAllHotCold" class="select-btn">Deselect All</button>
-        <div id="hotColdList"></div>
     </div>
 
     <!-- Bet Slip Popup -->
@@ -514,7 +510,7 @@
         <p>This tool helps you optimize your WNBA bets on PrizePicks.</p>
         <ul>
             <li>Use the search bar to find players or stats.</li>
-            <li>Filter by games, teams, callouts, bet tags, fav status, game scoring, or hot/cold using the buttons.</li>
+            <li>Filter by games, teams, callouts, bet tags, fav status, or game scoring using the buttons.</li>
             <li>Select odds type: All, Standard, Demon, or Goblin.</li>
             <li>Switch tabs to view different stat categories.</li>
             <li>On each player card, click 'More' or 'Less' to add bets to your slip.</li>
@@ -541,7 +537,6 @@
         let selectedBetTags = new Set();
         let selectedFav = new Set();
         let selectedGameTypes = new Set();
-        let selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
         let selectedBets = [];
         let selectedPayout = 'all';
         let betSlipsSortColumn = 'Edge';
@@ -624,7 +619,6 @@
             selectedBetTags = new Set(uniqueBetTags);
             selectedFav = new Set(['Yes', 'No']);
             selectedGameTypes = new Set(['High', 'Normal', 'Low']);
-            selectedHotCold = new Set(['Hot', 'Cold', 'Neutral']);
             let uniqueStatTypes = ['All', ...new Set(allData.map(row => (row['Stat Type'] || '').trim()).filter(Boolean))].sort();
             uniqueStatTypes.sort();
             const tabsDiv = document.querySelector('.tabs');
@@ -829,33 +823,17 @@
                     gameTypesList.appendChild(label);
                     gameTypesList.appendChild(document.createElement('br'));
                 });
-                const hotColdList = document.getElementById('hotColdList');
-                hotColdList.innerHTML = '';
-                ['Hot', 'Cold', 'Neutral'].forEach(status => {
-                    const label = document.createElement('label');
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = status;
-                    checkbox.checked = selectedHotCold.has(status);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(status + ' Batter'));
-                    hotColdList.appendChild(label);
-                    hotColdList.appendChild(document.createElement('br'));
-                });
                 document.getElementById('selectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = true);
                 document.getElementById('deselectAllBetTags').onclick = () => document.querySelectorAll('#betTagsList input').forEach(cb => cb.checked = false);
                 document.getElementById('selectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = true);
                 document.getElementById('deselectAllFav').onclick = () => document.querySelectorAll('#favList input').forEach(cb => cb.checked = false);
                 document.getElementById('selectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = true);
                 document.getElementById('deselectAllGameTypes').onclick = () => document.querySelectorAll('#gameTypesList input').forEach(cb => cb.checked = false);
-                document.getElementById('selectAllHotCold').onclick = () => document.querySelectorAll('#hotColdList input').forEach(cb => cb.checked = true);
-                document.getElementById('deselectAllHotCold').onclick = () => document.querySelectorAll('#hotColdList input').forEach(cb => cb.checked = false);
             });
             document.getElementById('applyAdvancedFilter').addEventListener('click', () => {
                 selectedBetTags = new Set(Array.from(document.querySelectorAll('#betTagsList input:checked')).map(cb => cb.value));
                 selectedFav = new Set(Array.from(document.querySelectorAll('#favList input:checked')).map(cb => cb.value));
                 selectedGameTypes = new Set(Array.from(document.querySelectorAll('#gameTypesList input:checked')).map(cb => cb.value));
-                selectedHotCold = new Set(Array.from(document.querySelectorAll('#hotColdList input:checked')).map(cb => cb.value));
                 document.getElementById('advancedFilterPopup').style.display = 'none';
                 renderContent();
             });
@@ -1003,21 +981,6 @@
             }
             return 0;
         }
-        function getHotColdStatus(playerName) {
-            const matchingLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', playerName));
-            if (matchingLogs.length === 0) return 'Neutral';
-            const recent = matchingLogs.slice(0, 7);
-            let hits = 0, ab = 0;
-            recent.forEach(log => {
-                hits += parseFloat(log.hits || log.H || 0);
-                ab += parseFloat(log.atBats || log.AB || 0);
-            });
-            if (ab < 10) return 'Neutral';
-            const ba = hits / ab;
-            if (ba >= 0.320) return 'Hot';
-            if (ba <= 0.180) return 'Cold';
-            return 'Neutral';
-        }
         function getGameLogStats(playerName, statType) {
             if (!playerName || !statType || !gameLogs || gameLogs.length === 0) return null;
             let matchingLogs = gameLogs.filter(log => nameMatches(log.fullName || log['fullName'] || log['Player Name'] || '', playerName));
@@ -1047,7 +1010,6 @@
             // UPDATED WNBA-ONLY FANTASY SCORE FILTER (Hitter/Pitcher removed)
             filtered = filtered.filter(row => {
                 const statType = (row['Stat Type'] || '').trim();
-                // WNBA-only: only "Fantasy Score" (no Hitter/Pitcher versions)
                 const isFantasyScore = statType === 'Fantasy Score';
                 if (isFantasyScore) {
                     return selectedGames.has(row['Game Short Title']) && selectedTeams.has(row.Team);
@@ -1057,31 +1019,25 @@
                 }
             });
 
-            // === FIXED BET TAG FILTER - NOW INCLUDES EMPTY BET TAGS (Fantasy Score, combos, etc.) ===
+            // FIXED BET TAG FILTER - INCLUDES EMPTY BET TAGS (Fantasy Score, combos, etc.)
             if (selectedBetTags.size > 0) {
                 filtered = filtered.filter(row => {
                     const betTag = (row['Bet Tag'] || '').trim();
                     return betTag === '' || selectedBetTags.has(betTag);
                 });
             }
-            // === END OF FIX ===
 
             if (selectedFav.size > 0) {
                 filtered = filtered.filter(row => selectedFav.has(row['Fav'] || 'No'));
             }
+            // UPDATED WNBA GAME SCORING THRESHOLDS (average total ~201 points)
             if (selectedGameTypes.size > 0) {
                 filtered = filtered.filter(row => {
                     const ou = parseFloat(row['O/U'] || 0);
                     let type = 'Normal';
-                    if (ou >= 9.6) type = 'High';
-                    else if (ou <= 8.4) type = 'Low';
+                    if (ou >= 208.5) type = 'High';
+                    else if (ou <= 193.5) type = 'Low';
                     return selectedGameTypes.has(type);
-                });
-            }
-            if (selectedHotCold.size > 0 && !selectedHotCold.has('Neutral')) {
-                filtered = filtered.filter(row => {
-                    const status = getHotColdStatus(row['Player Name']);
-                    return selectedHotCold.has(status);
                 });
             }
             filtered = filtered.filter(row => parseFloat(row['Edge %'] || 0) < 100);
@@ -1407,8 +1363,8 @@
             document.getElementById('popupScheduledAt').textContent = row['Scheduled At'] ? new Date(row['Scheduled At']).toLocaleString() : '';
          
             const ou = parseFloat(row['O/U'] || 0);
-            let ouColor = ou >= 9.6 ? 'ou-green' : ou <= 8.4 ? 'ou-red' : 'ou-yellow';
-            let ouText = ou >= 9.6 ? 'High' : ou <= 8.4 ? 'Low' : 'Normal';
+            let ouColor = ou >= 208.5 ? 'ou-green' : ou <= 193.5 ? 'ou-red' : 'ou-yellow';
+            let ouText = ou >= 208.5 ? 'High' : ou <= 193.5 ? 'Low' : 'Normal';
          
             const spread = parseFloat(row.Spread || 0);
             let spreadColor = '';
